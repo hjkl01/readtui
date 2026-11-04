@@ -1185,4 +1185,18 @@ mod tests {
     fn decodes_utf8_text() {
         assert_eq!(decode_text("中文小说".as_bytes()), "中文小说");
     }
+
+    #[test]
+    fn migrates_legacy_progress_and_bookmark_tables() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(
+            "CREATE TABLE reading_progress(path TEXT PRIMARY KEY,line INTEGER NOT NULL DEFAULT 0,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+             CREATE TABLE bookmarks(id INTEGER PRIMARY KEY AUTOINCREMENT,path TEXT NOT NULL,line INTEGER NOT NULL,note TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);"
+        ).unwrap();
+        init_db(&db).unwrap();
+        assert!(has_column(&db, "reading_progress", "byte_offset").unwrap());
+        assert!(has_column(&db, "reading_progress", "wrap_offset").unwrap());
+        assert!(has_column(&db, "bookmarks", "byte_offset").unwrap());
+        assert!(has_column(&db, "bookmarks", "wrap_offset").unwrap());
+    }
 }
