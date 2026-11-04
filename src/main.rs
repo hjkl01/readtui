@@ -630,7 +630,7 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
     if app.screen == Screen::Library {
         let items: Vec<ListItem> = app.books.iter().map(|book| {
             let path = book.path.strip_prefix(&app.library_dir).unwrap_or(&book.path);
-            ListItem::new(format!("{}{} [{}] {}   {}", if book.favorite { "★ " } else { "" }, book.title, match book.status.as_str() { "reading" => "阅读中", "finished" => "已读完", _ => "未读" }, if book.author.is_empty() { String::new() } else { format!("· {} ", book.author) }, path.display()) .style(Style::default().fg(if book.tags.is_empty() { Color::White } else { Color::Cyan })))
+            ListItem::new(format!("{}{} [{}] {}  {}   {}", if book.favorite { "★ " } else { "" }, book.title, match book.status.as_str() { "reading" => "阅读中", "finished" => "已读完", _ => "未读" }, if book.author.is_empty() { String::new() } else { format!("· {} ", book.author) }, book.tags.join(","), path.display())).style(Style::default().fg(if book.tags.is_empty() { Color::White } else { Color::Cyan }))
         }).collect();
         let list = List::new(items).block(Block::default().title(format!("书库 · {} 本", app.books.len())).borders(Borders::ALL))
             .highlight_style(Style::default().bg(Color::DarkGray).fg(Color::White).add_modifier(Modifier::BOLD))
