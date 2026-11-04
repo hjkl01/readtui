@@ -18,7 +18,7 @@
 ## Phase 2 — Library management
 
 - [x] Open/import an external file path interactively
-- [ ] Batch directory import and library rescan command
+- [x] Batch directory import and library rescan command
 - [x] Book title and author editing
 - [x] Tags, favorites, and unread/reading/finished status
 - [ ] Collections and tag-based filtering
@@ -30,7 +30,8 @@
 - [x] Bookmark browser, jump, and delete
 - [x] Paragraph annotations and excerpts with jump/delete
 - [x] Current-book and cross-library literal search
-- [ ] Annotation editing/export and chapter-only search
+- [x] Annotation editing and Markdown export
+- [ ] Chapter-only search
 - [ ] Configurable chapter detection rules
 - [ ] Stable progress locations across reflow
 
@@ -43,10 +44,10 @@
 
 ## Phase 5 — Statistics and polish
 
-- [x] Reading session duration and total/today statistics
+- [x] Reading session duration and total/today/rolling-week/month statistics
 - [x] Daily reading goal
 - [x] Light/dark theme toggle
-- [ ] Weekly/monthly statistics and reading streaks
+- [ ] Reading streaks
 - [ ] User-defined key bindings and configurable typography
 - [ ] Database backup/import/export and orphan cleanup
 - [ ] Windows/macOS/Linux release automation
