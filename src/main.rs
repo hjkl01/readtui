@@ -377,14 +377,6 @@ fn load_book_metadata(db: &Connection, books: &mut [Book]) -> Result<()> {
     Ok(())
 }
 
-fn decode_text(bytes: &[u8]) -> String {
-    if let Some(s) = std::str::from_utf8(bytes).ok() { return s.trim_start_matches('\u{feff}').to_string(); }
-    let (decoded, _, had_errors) = encoding_rs::GB18030.decode(bytes);
-    if !had_errors { return decoded.into_owned(); }
-    let (decoded, _, _) = encoding_rs::BIG5.decode(bytes);
-    decoded.into_owned()
-}
-
 impl App {
     fn import_directory(&mut self, root: &Path) -> Result<usize> {
         if !root.is_dir() { self.status = "目录不存在".into(); return Ok(0); }
@@ -1183,7 +1175,7 @@ mod tests {
 
     #[test]
     fn decodes_utf8_text() {
-        assert_eq!(decode_text("中文小说".as_bytes()), "中文小说");
+        assert_eq!(document::decode_line("中文小说".as_bytes()), "中文小说");
     }
 
     #[test]
