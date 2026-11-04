@@ -183,6 +183,7 @@ fn main() -> Result<()> {
     init_db(&db)?;
 
     let mut books = scan_books(&library_dir);
+    load_registered_books(&db, &mut books)?;
     load_book_metadata(&db, &mut books)?;
     let theme_light = load_setting(&db, "theme").unwrap_or_else(|_| "dark".into()) == "light";
     let mut app = App {
@@ -280,6 +281,9 @@ fn init_db(db: &Connection) -> Result<()> {
          CREATE TABLE IF NOT EXISTS settings (
            key TEXT PRIMARY KEY, value TEXT NOT NULL
          );
+         CREATE TABLE IF NOT EXISTS library_books (
+           path TEXT PRIMARY KEY, added_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+         );
          CREATE TABLE IF NOT EXISTS tags (
            id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE
          );
@@ -325,6 +329,19 @@ fn scan_books(root: &Path) -> Vec<Book> {
     }
     books.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
     books
+}
+
+fn load_registered_books(db: &Connection, books: &mut Vec<Book>) -> Result<()> {
+    let mut statement = db.prepare("SELECT path FROM library_books ORDER BY added_at DESC")?;
+    let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+    for row in rows {
+        let path = PathBuf::from(row?);
+        if !path.is_file() || books.iter().any(|book| book.path == path) { continue; }
+        let title = path.file_stem().and_then(|value| value.to_str()).unwrap_or("未命名").to_string();
+        books.push(Book { path, title, author: String::new(), favorite: false, status: "unread".into(), tags: Vec::new() });
+    }
+    books.sort_by(|a,b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
+    Ok(())
 }
 
 fn load_setting(db: &Connection, key: &str) -> Result<String> {
@@ -374,6 +391,7 @@ impl App {
             self.status = format!("暂不支持该文件格式：.{ext}");
             return Ok(());
         }
+        self.db.execute("INSERT OR IGNORE INTO library_books(path) VALUES (?1)", [path.to_string_lossy().as_ref()])?;
         if !self.books.iter().any(|book| book.path == path) {
             let title = path.file_stem().and_then(|value| value.to_str()).unwrap_or("未命名").to_string();
             self.books.push(Book { path: path.clone(), title, author: String::new(), favorite: false, status: "unread".into(), tags: Vec::new() });
