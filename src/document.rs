@@ -109,6 +109,7 @@ impl Document {
 
     pub fn search(&mut self, query: &str, from_line: usize, case_sensitive: bool) -> Result<Option<usize>> {
         if query.is_empty() || from_line >= self.line_count() { return Ok(None); }
+        let needle = if case_sensitive { query.to_string() } else { query.to_lowercase() };
         let mut reader = BufReader::new(self.file.try_clone()?);
         reader.seek(SeekFrom::Start(self.offset_for_line(from_line)))?;
         let mut buffer = Vec::with_capacity(4096);
@@ -116,8 +117,8 @@ impl Document {
             buffer.clear();
             if reader.read_until(b'\n', &mut buffer)? == 0 { break; }
             let text = decode_line(&buffer);
-            let found = if case_sensitive { text.contains(query) }
-                else { text.to_lowercase().contains(&query.to_lowercase()) };
+            let found = if case_sensitive { text.contains(&needle) }
+                else { text.to_lowercase().contains(&needle) };
             if found { return Ok(Some(line)); }
         }
         Ok(None)
