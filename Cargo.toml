@@ -1,0 +1,33 @@
+[package]
+name = "readtui"
+version = "0.1.0"
+edition = "2021"
+description = "A feature-rich terminal novel reader and local library manager"
+license = "MIT"
+repository = "https://github.com/hjkl01/readtui"
+readme = "README.md"
+
+[[bin]]
+name = "readtui"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4", features = ["derive"] }
+crossterm = "0.28"
+dirs = "6"
+encoding_rs = "0.8"
+ratatui = "0.29"
+regex = "1"
+rusqlite = { version = "0.32", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+unicode-width = "0.2"
+walkdir = "2"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
