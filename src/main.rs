@@ -156,6 +156,7 @@ struct App {
     annotation_mode: bool,
     annotation_edit_mode: bool,
     export_mode: bool,
+    directory_import_mode: bool,
     tag_mode: bool,
     metadata_mode: bool,
     goal_mode: bool,
@@ -208,6 +209,7 @@ fn main() -> Result<()> {
         annotation_mode: false,
         annotation_edit_mode: false,
         export_mode: false,
+        directory_import_mode: false,
         tag_mode: false,
         metadata_mode: false,
         goal_mode: false,
@@ -384,6 +386,37 @@ fn decode_text(bytes: &[u8]) -> String {
 }
 
 impl App {
+    fn import_directory(&mut self, root: &Path) -> Result<usize> {
+        if !root.is_dir() { self.status = "目录不存在".into(); return Ok(0); }
+        let mut imported = 0usize;
+        for entry in WalkDir::new(root).follow_links(false).into_iter().filter_map(|entry| entry.ok()) {
+            if !entry.file_type().is_file() { continue; }
+            let path = entry.path().canonicalize().unwrap_or_else(|_| entry.path().to_path_buf());
+            let ext = path.extension().and_then(|value| value.to_str()).unwrap_or("").to_ascii_lowercase();
+            if !matches!(ext.as_str(), "txt" | "md" | "markdown" | "epub" | "html" | "htm" | "fb2") { continue; }
+            if self.books.iter().any(|book| book.path == path) { continue; }
+            self.db.execute("INSERT OR IGNORE INTO library_books(path) VALUES (?1)", [path.to_string_lossy().as_ref()])?;
+            let title = path.file_stem().and_then(|value| value.to_str()).unwrap_or("未命名").to_string();
+            self.books.push(Book { path, title, author: String::new(), favorite: false, status: "unread".into(), tags: Vec::new() });
+            imported += 1;
+        }
+        self.books.sort_by(|a,b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
+        load_book_metadata(&self.db, &mut self.books)?;
+        self.status = format!("目录导入完成，新增 {imported} 本书");
+        Ok(imported)
+    }
+
+    fn rescan_library(&mut self) -> Result<()> {
+        let mut books = scan_books(&self.library_dir);
+        load_registered_books(&self.db, &mut books)?;
+        load_book_metadata(&self.db, &mut books)?;
+        self.books = books;
+        self.selected = self.selected.min(self.books.len().saturating_sub(1));
+        self.list_state.select(if self.books.is_empty() { None } else { Some(self.selected) });
+        self.status = format!("书库扫描完成，共 {} 本书", self.books.len());
+        Ok(())
+    }
+
     fn add_book_path(&mut self, path: PathBuf) -> Result<()> {
         let path = path.canonicalize().unwrap_or(path);
         if !path.is_file() {
@@ -879,7 +912,7 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
     if let Some(input) = &app.input {
         let popup = centered_rect(60, 20, area);
         frame.render_widget(Clear, popup);
-        let title = if app.export_mode { "导出笔记/书签的 Markdown 文件路径" } else if app.annotation_edit_mode { "编辑笔记内容" } else if app.goal_mode { "每日阅读目标（分钟）" } else if app.library_search_mode { "跨书搜索关键词" } else if app.annotation_mode { "为当前段落添加笔记" } else if app.tag_mode { "输入标签名称" } else if app.metadata_mode { "编辑书名|作者（作者可留空）" } else if app.screen == Screen::Reader { "搜索当前书籍" } else { "输入文件路径" };
+        let title = if app.directory_import_mode { "输入要导入的目录路径" } else if app.export_mode { "导出笔记/书签的 Markdown 文件路径" } else if app.annotation_edit_mode { "编辑笔记内容" } else if app.goal_mode { "每日阅读目标（分钟）" } else if app.library_search_mode { "跨书搜索关键词" } else if app.annotation_mode { "为当前段落添加笔记" } else if app.tag_mode { "输入标签名称" } else if app.metadata_mode { "编辑书名|作者（作者可留空）" } else if app.screen == Screen::Reader { "搜索当前书籍" } else { "输入文件路径" };
         frame.render_widget(Paragraph::new(input.as_str()).block(Block::default().title(title).borders(Borders::ALL)), popup);
     }
 }
@@ -901,6 +934,7 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 app.annotation_mode = false;
                 app.annotation_edit_mode = false;
                 app.export_mode = false;
+                app.directory_import_mode = false;
                 app.tag_mode = false;
                 app.metadata_mode = false;
                 app.goal_mode = false;
@@ -908,7 +942,10 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
             },
             KeyCode::Enter => {
                 let value = input.clone(); app.input = None;
-                if app.export_mode {
+                if app.directory_import_mode {
+                    app.directory_import_mode = false;
+                    app.import_directory(Path::new(&value))?;
+                } else if app.export_mode {
                     app.export_mode = false;
                     app.export_book_notes(&value)?;
                 } else if app.annotation_edit_mode {
@@ -972,6 +1009,8 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
             KeyCode::Up | KeyCode::Char('k') => { app.selected = app.selected.saturating_sub(1); },
             KeyCode::Enter => { if let Some(book) = app.books.get(app.selected) { app.open_book(book.path.clone())?; } },
             KeyCode::Char('a') => app.input = Some(String::new()),
+            KeyCode::Char('A') => { app.directory_import_mode = true; app.input = Some(String::new()); },
+            KeyCode::Char('r') => app.rescan_library()?,
             KeyCode::Char('/') => { app.library_search_mode = true; app.input = Some(String::new()); },
             KeyCode::Char('f') => app.toggle_favorite()?,
             KeyCode::Char('s') => app.cycle_book_status()?,
@@ -982,7 +1021,7 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
             KeyCode::Char('S') => app.show_statistics()?,
             KeyCode::Char('G') => { app.goal_mode = true; app.input = Some(String::new()); },
             KeyCode::Char('c') => app.toggle_theme()?,
-            KeyCode::Char('?') => app.status = "↑/k 上移  ↓/j 下移  Enter 阅读  a 添加路径  / 跨书搜索  f 收藏  s 状态  t 标签  e 编辑元数据  x 清空标签  o 收藏优先  G 每日目标  c 主题  S 统计  q 退出".into(),
+            KeyCode::Char('?') => app.status = "↑/k 上移  ↓/j 下移  Enter 阅读  a 打开文件  A 导入目录  r 重扫书库  / 跨书搜索  f 收藏  s 状态  t 标签  e 编辑元数据  x 清空标签  o 收藏优先  G 每日目标  c 主题  S 统计  q 退出".into(),
             _ => {}
         }
         app.list_state.select(if app.books.is_empty() { None } else { Some(app.selected) });
