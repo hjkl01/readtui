@@ -1,3 +1,4 @@
+mod document;
 mod layout;
 
 use anyhow::{Context, Result};
@@ -15,8 +16,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
     Terminal,
 };
-use regex::Regex;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use std::{
     fs,
     io::{self, stdout},
@@ -24,6 +24,7 @@ use std::{
     time::Duration,
 };
 use walkdir::WalkDir;
+use document::{Chapter, Document};
 
 #[derive(Parser, Debug)]
 #[command(name = "readtui", version, about = "终端小说阅读器与本地书库管理工具")]
@@ -41,18 +42,59 @@ struct Book {
     title: String,
 }
 
-#[derive(Clone)]
-struct Chapter {
-    title: String,
-    line: usize,
-}
-
 struct Reader {
     book: Book,
-    lines: Vec<String>,
+    document: Document,
     chapters: Vec<Chapter>,
     top: usize,
     wrap_offset: usize,
+}
+
+impl Reader {
+    fn line_count(&self) -> usize { self.document.line_count() }
+
+    fn advance(&mut self, width: usize, rows: usize) -> Result<()> {
+        let mut remaining = rows.max(1);
+        while remaining > 0 && self.top < self.line_count() {
+            let text = self.document.read_line(self.top)?;
+            let count = layout::wrap_line(&text, width).len();
+            let available = count.saturating_sub(self.wrap_offset);
+            if remaining < available {
+                self.wrap_offset += remaining;
+                return Ok(());
+            }
+            remaining -= available;
+            if self.top + 1 >= self.line_count() {
+                self.wrap_offset = count.saturating_sub(1);
+                return Ok(());
+            }
+            self.top += 1;
+            self.wrap_offset = 0;
+        }
+        Ok(())
+    }
+
+    fn retreat(&mut self, width: usize, rows: usize) -> Result<()> {
+        let mut remaining = rows.max(1);
+        while remaining > 0 {
+            if self.wrap_offset > 0 {
+                let step = remaining.min(self.wrap_offset);
+                self.wrap_offset -= step;
+                remaining -= step;
+            } else if self.top > 0 {
+                self.top -= 1;
+                let text = self.document.read_line(self.top)?;
+                self.wrap_offset = layout::wrap_line(&text, width).len().saturating_sub(1);
+                remaining -= 1;
+            } else { break; }
+        }
+        Ok(())
+    }
+
+    fn jump_to_line(&mut self, line: usize) {
+        self.top = line.min(self.line_count().saturating_sub(1));
+        self.wrap_offset = 0;
+    }
 }
 
 #[derive(PartialEq)]
@@ -122,9 +164,24 @@ fn main() -> Result<()> {
     result
 }
 
+fn has_column(db: &Connection, table: &str, column: &str) -> Result<bool> {
+    let mut statement = db.prepare(&format!("PRAGMA table_info({table})"))?;
+    let columns = statement.query_map([], |row| row.get::<_, String>(1))?;
+    for name in columns { if name? == column { return Ok(true); } }
+    Ok(false)
+}
+
+fn add_column_if_missing(db: &Connection, table: &str, column: &str, definition: &str) -> Result<()> {
+    if !has_column(db, table, column)? {
+        db.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"))?;
+    }
+    Ok(())
+}
+
 fn init_db(db: &Connection) -> Result<()> {
     db.execute_batch(
         "PRAGMA journal_mode=WAL;
+         PRAGMA foreign_keys=ON;
          CREATE TABLE IF NOT EXISTS reading_progress (
            path TEXT PRIMARY KEY, line INTEGER NOT NULL DEFAULT 0,
            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -138,8 +195,41 @@ fn init_db(db: &Connection) -> Result<()> {
            id INTEGER PRIMARY KEY AUTOINCREMENT, path TEXT NOT NULL,
            started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
            ended_at TEXT, duration_seconds INTEGER NOT NULL DEFAULT 0
-         );",
+         );
+         CREATE TABLE IF NOT EXISTS annotations (
+           id INTEGER PRIMARY KEY AUTOINCREMENT, path TEXT NOT NULL,
+           line INTEGER NOT NULL, byte_offset INTEGER NOT NULL DEFAULT 0,
+           quote TEXT NOT NULL DEFAULT '', note TEXT NOT NULL DEFAULT '',
+           color TEXT NOT NULL DEFAULT 'yellow',
+           created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+         );
+         CREATE TABLE IF NOT EXISTS book_metadata (
+           path TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '',
+           author TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '',
+           favorite INTEGER NOT NULL DEFAULT 0,
+           status TEXT NOT NULL DEFAULT 'unread',
+           updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+         );
+         CREATE TABLE IF NOT EXISTS tags (
+           id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE
+         );
+         CREATE TABLE IF NOT EXISTS book_tags (
+           path TEXT NOT NULL, tag_id INTEGER NOT NULL,
+           PRIMARY KEY(path, tag_id),
+           FOREIGN KEY(tag_id) REFERENCES tags(id) ON DELETE CASCADE
+         );
+         CREATE INDEX IF NOT EXISTS idx_bookmarks_path ON bookmarks(path);
+         CREATE INDEX IF NOT EXISTS idx_annotations_path ON annotations(path);
+         CREATE INDEX IF NOT EXISTS idx_sessions_path ON reading_sessions(path);",
     )?;
+    // Forward-compatible migration from the original line-only schema.
+    for (column, definition) in [
+        ("byte_offset", "INTEGER NOT NULL DEFAULT 0"),
+        ("wrap_offset", "INTEGER NOT NULL DEFAULT 0"),
+    ] {
+        add_column_if_missing(db, "reading_progress", column, definition)?;
+        add_column_if_missing(db, "bookmarks", column, definition)?;
+    }
     Ok(())
 }
 
@@ -187,19 +277,23 @@ fn detect_chapters(lines: &[String]) -> Vec<Chapter> {
 
 impl App {
     fn open_book(&mut self, path: PathBuf) -> Result<()> {
-        let bytes = fs::read(&path).with_context(|| format!("无法读取文件：{}", path.display()))?;
-        let content = decode_text(&bytes);
-        let lines: Vec<String> = content.lines().map(str::to_string).collect();
-        let chapters = detect_chapters(&lines);
+        let mut document = Document::open(&path)?;
+        let chapters = document.detect_chapters()?;
+        let saved: Option<(i64, i64, i64)> = self.db.query_row(
+            "SELECT line, byte_offset, wrap_offset FROM reading_progress WHERE path=?1",
+            [path.to_string_lossy().as_ref()],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        ).optional()?;
+        let (line, byte_offset, wrap_offset) = saved.unwrap_or((0, 0, 0));
+        let top = if byte_offset > 0 {
+            document.line_for_offset(byte_offset as u64)
+        } else {
+            (line.max(0) as usize).min(document.line_count().saturating_sub(1))
+        };
         let title = path.file_stem().and_then(|s| s.to_str()).unwrap_or("未命名").to_string();
         let book = Book { path: path.clone(), title };
-        let saved: usize = self.db.query_row(
-            "SELECT line FROM reading_progress WHERE path=?1", [path.to_string_lossy().as_ref()],
-            |row| row.get::<_, i64>(0).map(|v| v.max(0) as usize),
-        ).unwrap_or(0);
         self.db.execute("INSERT INTO reading_sessions(path) VALUES (?1)", [path.to_string_lossy().as_ref()])?;
-        let top = saved.min(lines.len().saturating_sub(1));
-        self.reader = Some(Reader { book, lines, chapters, top, wrap_offset: 0 });
+        self.reader = Some(Reader { book, document, chapters, top, wrap_offset: wrap_offset.max(0) as usize });
         self.screen = Screen::Reader;
         self.show_toc = false;
         Ok(())
@@ -207,10 +301,17 @@ impl App {
 
     fn save_progress(&self) -> Result<()> {
         if let Some(reader) = &self.reader {
+            let offset = reader.document.offset_for_line(reader.top);
             self.db.execute(
-                "INSERT INTO reading_progress(path,line,updated_at) VALUES (?1,?2,CURRENT_TIMESTAMP)\
-                 ON CONFLICT(path) DO UPDATE SET line=excluded.line,updated_at=CURRENT_TIMESTAMP",
-                params![reader.book.path.to_string_lossy().as_ref(), reader.top as i64],
+                "INSERT INTO reading_progress(path,line,byte_offset,wrap_offset,updated_at)
+                 VALUES (?1,?2,?3,?4,CURRENT_TIMESTAMP)
+                 ON CONFLICT(path) DO UPDATE SET
+                   line=excluded.line, byte_offset=excluded.byte_offset,
+                   wrap_offset=excluded.wrap_offset, updated_at=CURRENT_TIMESTAMP",
+                params![
+                    reader.book.path.to_string_lossy().as_ref(),
+                    reader.top as i64, offset as i64, reader.wrap_offset as i64
+                ],
             )?;
         }
         Ok(())
@@ -218,7 +319,11 @@ impl App {
 
     fn add_bookmark(&mut self) -> Result<()> {
         if let Some(reader) = &self.reader {
-            self.db.execute("INSERT INTO bookmarks(path,line) VALUES (?1,?2)", params![reader.book.path.to_string_lossy().as_ref(), reader.top as i64])?;
+            let offset = reader.document.offset_for_line(reader.top);
+            self.db.execute(
+                "INSERT INTO bookmarks(path,line,byte_offset,wrap_offset) VALUES (?1,?2,?3,?4)",
+                params![reader.book.path.to_string_lossy().as_ref(), reader.top as i64, offset as i64, reader.wrap_offset as i64],
+            )?;
             self.status = "已添加书签".into();
         }
         Ok(())
