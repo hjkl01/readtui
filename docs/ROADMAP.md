@@ -10,37 +10,43 @@
 - [x] SQLite reading progress and bookmarks
 - [x] Literal search in current book
 - [x] Terminal-width-aware visual wrapping and visual-row pagination
-- [ ] Stable character/byte offsets across reflow and terminal resize
-- [ ] Large-file streaming/indexing
-- [ ] Configurable typography and themes
+- [x] Stable byte-offset + source-line + wrapped-row progress, with legacy database migration
+- [x] Large plain-text file streaming and byte-offset line index
+- [x] Light/dark theme toggle and daily reading goal
+- [ ] Configurable margins, paragraph spacing, and user-defined typography
 
 ## Phase 2 — Library management
 
-- [ ] Import files and directories interactively
-- [ ] Book metadata editing
-- [ ] Collections, tags, favorites, and reading status
+- [x] Open/import an external file path interactively
+- [ ] Batch directory import and library rescan command
+- [x] Book title and author editing
+- [x] Tags, favorites, and unread/reading/finished status
+- [ ] Collections and tag-based filtering
 - [ ] Duplicate detection and missing-file relinking
-- [ ] Recent books and sorting/filtering
+- [ ] Recent books and advanced sorting/filtering
 
 ## Phase 3 — Reading tools
 
-- [ ] Bookmark browser and editing
-- [ ] Annotations and excerpts
-- [ ] Chapter search and full-book search
+- [x] Bookmark browser, jump, and delete
+- [x] Paragraph annotations and excerpts with jump/delete
+- [x] Current-book and cross-library literal search
+- [ ] Annotation editing/export and chapter-only search
 - [ ] Configurable chapter detection rules
 - [ ] Stable progress locations across reflow
 
 ## Phase 4 — Formats
 
-- [ ] EPUB 2/3
-- [ ] Markdown semantic rendering
-- [ ] HTML and FB2
+- [x] EPUB 2/3 spine extraction and cached text reading
+- [x] Basic Markdown markup cleanup
+- [x] Basic HTML and FB2 text extraction
 - [ ] Evaluate MOBI/AZW3 and PDF support
 
 ## Phase 5 — Statistics and polish
 
-- [ ] Reading sessions and daily/weekly/monthly statistics
-- [ ] Reading goals and streaks
-- [ ] Themes and user-defined key bindings
-- [ ] Backup/export and database migrations
+- [x] Reading session duration and total/today statistics
+- [x] Daily reading goal
+- [x] Light/dark theme toggle
+- [ ] Weekly/monthly statistics and reading streaks
+- [ ] User-defined key bindings and configurable typography
+- [ ] Database backup/import/export and orphan cleanup
 - [ ] Windows/macOS/Linux release automation
