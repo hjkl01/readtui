@@ -151,9 +151,8 @@ pub fn retreat(lines: &[String], line: &mut usize, offset: &mut usize, width: us
         } else if *line > 0 {
             *line -= 1;
             let count = wrap_line(&lines[*line], width).len();
-            let step = remaining.min(count.saturating_sub(1));
-            *offset = count.saturating_sub(1) - step;
-            remaining -= step + 1;
+            *offset = count.saturating_sub(1);
+            remaining -= 1;
         } else {
             break;
         }
