@@ -303,6 +303,15 @@ fn init_db(db: &Connection) -> Result<()> {
     Ok(())
 }
 
+fn reader_source_path(path: &Path) -> Result<PathBuf> {
+    let cache_dir = dirs::cache_dir().unwrap_or_else(|| std::env::temp_dir()).join("readtui/formats");
+    match path.extension().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase().as_str() {
+        "epub" => epub::extract_to_cache(path, &cache_dir.join("epub")),
+        "md" | "markdown" | "html" | "htm" | "fb2" => formats::to_cache(path, &cache_dir),
+        _ => Ok(path.to_path_buf()),
+    }
+}
+
 fn scan_books(root: &Path) -> Vec<Book> {
     let mut books = Vec::new();
     for entry in WalkDir::new(root).follow_links(false).into_iter().filter_map(|entry| entry.ok()) {
@@ -355,12 +364,7 @@ fn decode_text(bytes: &[u8]) -> String {
 
 impl App {
     fn open_book(&mut self, path: PathBuf) -> Result<()> {
-        let cache_dir = dirs::cache_dir().unwrap_or_else(|| std::env::temp_dir()).join("readtui/formats");
-        let document_path = match path.extension().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase().as_str() {
-            "epub" => epub::extract_to_cache(&path, &cache_dir.join("epub"))?,
-            "md" | "markdown" | "html" | "htm" | "fb2" => formats::to_cache(&path, &cache_dir)?,
-            _ => path.clone(),
-        };
+        let document_path = reader_source_path(&path)?;
         let mut document = Document::open(&document_path)?;
         let chapters = document.detect_chapters()?;
         let saved: Option<(i64, i64, i64)> = self.db.query_row(
@@ -618,10 +622,8 @@ impl App {
         let books = self.books.clone();
         for book in books {
             if self.search_results.len() >= 200 { break; }
-            if book.path.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("epub")) {
-                continue;
-            }
-            let mut document = match Document::open(&book.path) { Ok(doc) => doc, Err(_) => continue };
+            let source = match reader_source_path(&book.path) { Ok(path) => path, Err(_) => continue };
+            let mut document = match Document::open(&source) { Ok(doc) => doc, Err(_) => continue };
             if let Some(line) = document.search(query, 0, false)? {
                 let snippet = document.read_line(line)?;
                 self.search_results.push(SearchResult { path: book.path, title: book.title, line, snippet });
