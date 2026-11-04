@@ -9,7 +9,8 @@
 - [x] Keyboard navigation and interactive chapter list
 - [x] SQLite reading progress and bookmarks
 - [x] Literal search in current book
-- [ ] Correct terminal-width-aware visual pagination and stable character offsets
+- [x] Terminal-width-aware visual wrapping and visual-row pagination
+- [ ] Stable character/byte offsets across reflow and terminal resize
 - [ ] Large-file streaming/indexing
 - [ ] Configurable typography and themes
 
