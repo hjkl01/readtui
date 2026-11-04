@@ -45,6 +45,7 @@ struct Book {
     author: String,
     favorite: bool,
     status: String,
+    tags: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -145,6 +146,8 @@ struct App {
     annotations: Vec<Annotation>,
     annotation_selected: usize,
     annotation_mode: bool,
+    tag_mode: bool,
+    metadata_mode: bool,
     statistics: Option<String>,
     input: Option<String>,
     status: String,
@@ -185,6 +188,8 @@ fn main() -> Result<()> {
         annotations: Vec::new(),
         annotation_selected: 0,
         annotation_mode: false,
+        tag_mode: false,
+        metadata_mode: false,
         statistics: None,
         input: None,
         status: "按 Enter 阅读，a 添加文件，? 查看快捷键".into(),
@@ -282,7 +287,7 @@ fn scan_books(root: &Path) -> Vec<Book> {
         let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase();
         if ext == "txt" || ext == "md" || ext == "markdown" || ext == "epub" {
             let title = path.file_stem().and_then(|s| s.to_str()).unwrap_or("未命名").to_string();
-            books.push(Book { path: path.to_path_buf(), title, author: String::new(), favorite: false, status: "unread".into() });
+            books.push(Book { path: path.to_path_buf(), title, author: String::new(), favorite: false, status: "unread".into(), tags: Vec::new() });
         }
     }
     books.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
@@ -302,6 +307,11 @@ fn load_book_metadata(db: &Connection, books: &mut [Book]) -> Result<()> {
             book.favorite = favorite;
             book.status = status;
         }
+        let mut statement = db.prepare(
+            "SELECT t.name FROM tags t JOIN book_tags bt ON bt.tag_id=t.id WHERE bt.path=?1 ORDER BY t.name"
+        )?;
+        let rows = statement.query_map([book.path.to_string_lossy().as_ref()], |row| row.get::<_, String>(0))?;
+        book.tags = rows.collect::<rusqlite::Result<Vec<_>>>()?;
     }
     Ok(())
 }
@@ -533,6 +543,45 @@ impl App {
         }
         Ok(())
     }
+
+    fn add_tag_to_selected(&mut self, tag: &str) -> Result<()> {
+        let tag = tag.trim();
+        if tag.is_empty() { return Ok(()); }
+        if let Some(book) = self.books.get_mut(self.selected) {
+            self.db.execute("INSERT OR IGNORE INTO tags(name) VALUES (?1)", [tag])?;
+            let tag_id: i64 = self.db.query_row("SELECT id FROM tags WHERE name=?1", [tag], |row| row.get(0))?;
+            self.db.execute("INSERT OR IGNORE INTO book_tags(path,tag_id) VALUES (?1,?2)", params![book.path.to_string_lossy().as_ref(), tag_id])?;
+            if !book.tags.iter().any(|existing| existing == tag) { book.tags.push(tag.to_string()); }
+            self.status = format!("已添加标签：{tag}");
+        }
+        Ok(())
+    }
+
+    fn clear_selected_tags(&mut self) -> Result<()> {
+        if let Some(book) = self.books.get_mut(self.selected) {
+            self.db.execute("DELETE FROM book_tags WHERE path=?1", [book.path.to_string_lossy().as_ref()])?;
+            book.tags.clear();
+            self.status = "已清除该书全部标签".into();
+        }
+        Ok(())
+    }
+
+    fn edit_selected_metadata(&mut self, value: &str) -> Result<()> {
+        if let Some(book) = self.books.get_mut(self.selected) {
+            let mut parts = value.splitn(2, '|');
+            let title = parts.next().unwrap_or("").trim();
+            let author = parts.next().unwrap_or("").trim();
+            if !title.is_empty() { book.title = title.to_string(); }
+            if !author.is_empty() { book.author = author.to_string(); }
+            self.db.execute(
+                "INSERT INTO book_metadata(path,title,author,favorite,status) VALUES (?1,?2,?3,?4,?5)
+                 ON CONFLICT(path) DO UPDATE SET title=excluded.title,author=excluded.author,updated_at=CURRENT_TIMESTAMP",
+                params![book.path.to_string_lossy().as_ref(), book.title, book.author, book.favorite as i64, book.status],
+            )?;
+            self.status = "书籍元数据已更新（格式：书名|作者）".into();
+        }
+        Ok(())
+    }
 }
 
 fn setup_terminal() -> Result<Terminal<CrosstermBackend<io::Stdout>>> {
@@ -581,7 +630,7 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
     if app.screen == Screen::Library {
         let items: Vec<ListItem> = app.books.iter().map(|book| {
             let path = book.path.strip_prefix(&app.library_dir).unwrap_or(&book.path);
-            ListItem::new(format!("{}{} [{}] {}   {}", if book.favorite { "★ " } else { "" }, book.title, match book.status.as_str() { "reading" => "阅读中", "finished" => "已读完", _ => "未读" }, if book.author.is_empty() { String::new() } else { format!("· {} ", book.author) }, path.display()))
+            ListItem::new(format!("{}{} [{}] {}   {}", if book.favorite { "★ " } else { "" }, book.title, match book.status.as_str() { "reading" => "阅读中", "finished" => "已读完", _ => "未读" }, if book.author.is_empty() { String::new() } else { format!("· {} ", book.author) }, path.display()) .style(Style::default().fg(if book.tags.is_empty() { Color::White } else { Color::Cyan })))
         }).collect();
         let list = List::new(items).block(Block::default().title(format!("书库 · {} 本", app.books.len())).borders(Borders::ALL))
             .highlight_style(Style::default().bg(Color::DarkGray).fg(Color::White).add_modifier(Modifier::BOLD))
@@ -676,7 +725,7 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
     if let Some(input) = &app.input {
         let popup = centered_rect(60, 20, area);
         frame.render_widget(Clear, popup);
-        let title = if app.annotation_mode { "为当前段落添加笔记" } else if app.screen == Screen::Reader { "搜索当前书籍" } else { "输入文件路径" };
+        let title = if app.annotation_mode { "为当前段落添加笔记" } else if app.tag_mode { "输入标签名称" } else if app.metadata_mode { "编辑书名|作者（作者可留空）" } else if app.screen == Screen::Reader { "搜索当前书籍" } else { "输入文件路径" };
         frame.render_widget(Paragraph::new(input.as_str()).block(Block::default().title(title).borders(Borders::ALL)), popup);
     }
 }
@@ -703,6 +752,12 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 if app.annotation_mode {
                     app.annotation_mode = false;
                     if !value.trim().is_empty() { app.add_annotation(value.trim())?; }
+                } else if app.tag_mode {
+                    app.tag_mode = false;
+                    app.add_tag_to_selected(&value)?;
+                } else if app.metadata_mode {
+                    app.metadata_mode = false;
+                    app.edit_selected_metadata(&value)?;
                 } else if app.screen == Screen::Library {
                     let path = PathBuf::from(value);
                     if path.is_file() { app.open_book(path)?; }
@@ -731,9 +786,12 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
             KeyCode::Char('a') => app.input = Some(String::new()),
             KeyCode::Char('f') => app.toggle_favorite()?,
             KeyCode::Char('s') => app.cycle_book_status()?,
+            KeyCode::Char('t') => { app.tag_mode = true; app.input = Some(String::new()); },
+            KeyCode::Char('e') => { app.metadata_mode = true; app.input = Some(String::new()); },
+            KeyCode::Char('x') => app.clear_selected_tags()?,
             KeyCode::Char('o') => app.books.sort_by(|a,b| b.favorite.cmp(&a.favorite).then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))),
             KeyCode::Char('S') => app.show_statistics()?,
-            KeyCode::Char('?') => app.status = "↑/k 上移  ↓/j 下移  Enter 阅读  a 添加路径  f 收藏  s 状态  o 收藏优先  S 统计  q 退出".into(),
+            KeyCode::Char('?') => app.status = "↑/k 上移  ↓/j 下移  Enter 阅读  a 添加路径  f 收藏  s 状态  t 标签  e 编辑元数据  x 清空标签  o 收藏优先  S 统计  q 退出".into(),
             _ => {}
         }
         app.list_state.select(if app.books.is_empty() { None } else { Some(app.selected) });
