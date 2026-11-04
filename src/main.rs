@@ -406,6 +406,26 @@ impl App {
         Ok(imported)
     }
 
+    fn sort_by_recent(&mut self) -> Result<()> {
+        let mut recent: Vec<(String, String)> = Vec::new();
+        {
+            let mut statement = self.db.prepare("SELECT path,updated_at FROM reading_progress")?;
+            let rows = statement.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?;
+            for row in rows { recent.push(row?); }
+        }
+        self.books.sort_by(|a,b| {
+            let a_path = a.path.to_string_lossy();
+            let b_path = b.path.to_string_lossy();
+            let a_time = recent.iter().find(|entry| entry.0 == a_path.as_ref()).map(|entry| entry.1.as_str()).unwrap_or("");
+            let b_time = recent.iter().find(|entry| entry.0 == b_path.as_ref()).map(|entry| entry.1.as_str()).unwrap_or("");
+            b_time.cmp(a_time).then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
+        });
+        self.selected = 0;
+        self.list_state.select(if self.books.is_empty() { None } else { Some(0) });
+        self.status = "已按最近阅读时间排序".into();
+        Ok(())
+    }
+
     fn rescan_library(&mut self) -> Result<()> {
         let mut books = scan_books(&self.library_dir);
         load_registered_books(&self.db, &mut books)?;
@@ -1023,6 +1043,7 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
             KeyCode::Char('e') => { app.metadata_mode = true; app.input = Some(String::new()); },
             KeyCode::Char('x') => app.clear_selected_tags()?,
             KeyCode::Char('o') => app.books.sort_by(|a,b| b.favorite.cmp(&a.favorite).then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))),
+            KeyCode::Char('R') => app.sort_by_recent()?,
             KeyCode::Char('S') => app.show_statistics()?,
             KeyCode::Char('G') => { app.goal_mode = true; app.input = Some(String::new()); },
             KeyCode::Char('c') => app.toggle_theme()?,
