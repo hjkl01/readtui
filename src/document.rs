@@ -145,6 +145,7 @@ mod tests {
         assert_eq!(doc.line_count(), 3);
         assert_eq!(doc.read_line(1).unwrap(), "第二行");
         assert_eq!(doc.line_for_offset(doc.offset_for_line(2)), 2);
+        drop(doc);
         std::fs::remove_file(path).unwrap();
     }
 
@@ -154,6 +155,7 @@ mod tests {
         std::fs::write(&path, "").unwrap();
         let doc = Document::open(&path).unwrap();
         assert_eq!(doc.line_count(), 0);
+        drop(doc);
         std::fs::remove_file(path).unwrap();
     }
 }
