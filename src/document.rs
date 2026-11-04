@@ -73,12 +73,10 @@ impl Document {
             return Ok(String::new());
         };
         self.file.seek(SeekFrom::Start(offset))?;
+        let mut reader = BufReader::new(&mut self.file);
         let mut bytes = Vec::with_capacity(1024);
-        let mut byte = [0u8; 1];
-        while self.file.read(&mut byte)? == 1 {
-            if byte[0] == b'\n' { break; }
-            bytes.push(byte[0]);
-        }
+        reader.read_until(b'\n', &mut bytes)?;
+        if bytes.last() == Some(&b'\n') { bytes.pop(); }
         if bytes.last() == Some(&b'\r') { bytes.pop(); }
         Ok(decode_line(&bytes))
     }
