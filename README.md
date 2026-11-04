@@ -12,7 +12,8 @@ The first development milestone provides a working foundation:
 - Open a book directly from the command line or from the library screen.
 - Decode UTF-8, GB18030/GBK-compatible text, and Big5 fallback.
 - Detect common Chinese and English chapter headings.
-- Navigate with Vim-style keys, page keys, and an interactive chapter list.
+- Navigate with Vim-style keys, visual-row-aware page keys, and an interactive chapter list.
+- Wrap CJK text by terminal cell width and keep common opening/closing punctuation with adjacent text.
 - Persist reading position and bookmarks in SQLite.
 - Search the currently opened text for a literal phrase.
 
@@ -62,9 +63,9 @@ From the library screen, press `a` and enter a file path to open a file outside 
 
 | Key | Action |
 |---|---|
-| `j` / `k`, `↑` / `↓` | Scroll one source line |
-| `Space` / `PageDown` | Move forward 20 source lines |
-| `PageUp` | Move backward 20 source lines |
+| `j` / `k`, `↑` / `↓` | Scroll one visual row |
+| `Space` / `PageDown` | Move forward one screen |
+| `PageUp` | Move backward one screen |
 | `g` / `Home` | Go to the beginning |
 | `G` / `End` | Go to the end |
 | `n` / `N` | Next / previous detected chapter |
