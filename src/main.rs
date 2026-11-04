@@ -365,7 +365,7 @@ impl App {
             (line.max(0) as usize).min(document.line_count().saturating_sub(1))
         };
         let title = path.file_stem().and_then(|s| s.to_str()).unwrap_or("未命名").to_string();
-        let book = Book { path: path.clone(), title };
+        let book = Book { path: path.clone(), title, author: String::new(), favorite: false, status: "unread".into(), tags: Vec::new() };
         self.db.execute("INSERT INTO reading_sessions(path) VALUES (?1)", [path.to_string_lossy().as_ref()])?;
         let session_id = self.db.last_insert_rowid();
         self.reader = Some(Reader { book, document, chapters, top, wrap_offset: wrap_offset.max(0) as usize, session_id });
