@@ -24,7 +24,6 @@ use std::{
     time::Duration,
 };
 use walkdir::WalkDir;
-use unicode_width::UnicodeWidthChar;
 
 #[derive(Parser, Debug)]
 #[command(name = "readtui", version, about = "终端小说阅读器与本地书库管理工具")]
@@ -53,6 +52,7 @@ struct Reader {
     lines: Vec<String>,
     chapters: Vec<Chapter>,
     top: usize,
+    wrap_offset: usize,
 }
 
 #[derive(PartialEq)]
@@ -199,7 +199,7 @@ impl App {
         ).unwrap_or(0);
         self.db.execute("INSERT INTO reading_sessions(path) VALUES (?1)", [path.to_string_lossy().as_ref()])?;
         let top = saved.min(lines.len().saturating_sub(1));
-        self.reader = Some(Reader { book, lines, chapters, top });
+        self.reader = Some(Reader { book, lines, chapters, top, wrap_offset: 0 });
         self.screen = Screen::Reader;
         self.show_toc = false;
         Ok(())
@@ -277,8 +277,12 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
         app.viewport_width = text_width;
         app.viewport_height = height;
         let end = layout::page_end(&reader.lines, reader.top, text_width, height).min(reader.lines.len());
-        let visible: Vec<Line> = reader.lines.iter().skip(reader.top)
-            .flat_map(|line| wrap_cjk_line(line, text_width))
+        let visible: Vec<Line> = reader.lines.iter().enumerate().skip(reader.top)
+            .flat_map(|(index, line)| {
+                let wrapped = wrap_cjk_line(line, text_width);
+                if index == reader.top { wrapped.into_iter().skip(reader.wrap_offset).collect::<Vec<_>>() }
+                else { wrapped }
+            })
             .take(height)
             .map(|line| Line::from(Span::raw(line)))
             .collect();
@@ -336,7 +340,7 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
                     else { app.status = "文件不存在，请输入有效路径".into(); }
                 } else if let Some(reader) = &mut app.reader {
                     if let Some(pos) = reader.lines.iter().position(|line| line.contains(&value)) {
-                        reader.top = pos;
+                        reader.top = pos; reader.wrap_offset = 0;
                         app.status = format!("找到匹配内容：第 {} 行", pos + 1);
                     } else {
                         app.status = "没有找到匹配内容".into();
@@ -372,7 +376,7 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 KeyCode::Enter => {
                     if let Some(reader) = &mut app.reader {
                         if let Some(chapter) = reader.chapters.get(app.toc_selected) {
-                            reader.top = chapter.line;
+                            reader.top = chapter.line; reader.wrap_offset = 0;
                             app.status = format!("已跳转到：{}", chapter.title);
                         }
                     }
@@ -386,17 +390,20 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
         }
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') => { app.save_progress()?; app.screen = Screen::Library; app.reader = None; },
-            KeyCode::Down | KeyCode::Char('j') => if let Some(r) = &mut app.reader { r.top = (r.top + 1).min(r.lines.len().saturating_sub(1)); },
-            KeyCode::Up | KeyCode::Char('k') => if let Some(r) = &mut app.reader { r.top = r.top.saturating_sub(1); },
+            KeyCode::Down | KeyCode::Char('j') => if let Some(r) = &mut app.reader {
+                layout::advance(&r.lines, &mut r.top, &mut r.wrap_offset, app.viewport_width, 1);
+            },
+            KeyCode::Up | KeyCode::Char('k') => if let Some(r) = &mut app.reader {
+                layout::retreat(&r.lines, &mut r.top, &mut r.wrap_offset, app.viewport_width, 1);
+            },
             KeyCode::PageDown | KeyCode::Char(' ') => if let Some(r) = &mut app.reader {
-                let next = layout::page_end(&r.lines, r.top, app.viewport_width, app.viewport_height);
-                r.top = next.min(r.lines.len().saturating_sub(1));
+                layout::advance(&r.lines, &mut r.top, &mut r.wrap_offset, app.viewport_width, app.viewport_height);
             },
             KeyCode::PageUp => if let Some(r) = &mut app.reader {
-                r.top = layout::page_start(&r.lines, r.top, app.viewport_width, app.viewport_height);
+                layout::retreat(&r.lines, &mut r.top, &mut r.wrap_offset, app.viewport_width, app.viewport_height);
             },
-            KeyCode::Home | KeyCode::Char('g') => if let Some(r) = &mut app.reader { r.top = 0; },
-            KeyCode::End | KeyCode::Char('G') => if let Some(r) = &mut app.reader { r.top = r.lines.len().saturating_sub(1); },
+            KeyCode::Home | KeyCode::Char('g') => if let Some(r) = &mut app.reader { r.top = 0; r.wrap_offset = 0; },
+            KeyCode::End | KeyCode::Char('G') => if let Some(r) = &mut app.reader { r.top = r.lines.len().saturating_sub(1); r.wrap_offset = 0; },
             KeyCode::Char('t') => {
                 if let Some(reader) = &app.reader {
                     app.toc_selected = reader.chapters.iter().rposition(|chapter| chapter.line <= reader.top).unwrap_or(0);
@@ -406,10 +413,10 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
             KeyCode::Char('b') => app.add_bookmark()?,
             KeyCode::Char('/') => app.input = Some(String::new()),
             KeyCode::Char('n') => if let Some(r) = &mut app.reader {
-                if let Some(next) = r.chapters.iter().find(|c| c.line > r.top) { r.top = next.line; }
+                if let Some(next) = r.chapters.iter().find(|c| c.line > r.top) { r.top = next.line; r.wrap_offset = 0; }
             },
             KeyCode::Char('N') => if let Some(r) = &mut app.reader {
-                if let Some(prev) = r.chapters.iter().rev().find(|c| c.line < r.top) { r.top = prev.line; }
+                if let Some(prev) = r.chapters.iter().rev().find(|c| c.line < r.top) { r.top = prev.line; r.wrap_offset = 0; }
             },
             KeyCode::Char('?') => app.status = "j/k 滚动  Space/PageDown 下一页  PageUp 上一页  t 目录  n/N 章节  b 书签  / 搜索  q 返回".into(),
             _ => {}
