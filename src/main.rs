@@ -1,4 +1,5 @@
 mod document;
+mod epub;
 mod layout;
 
 use anyhow::{Context, Result};
@@ -264,7 +265,7 @@ fn scan_books(root: &Path) -> Vec<Book> {
         if !entry.file_type().is_file() { continue; }
         let path = entry.path();
         let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase();
-        if ext == "txt" || ext == "md" || ext == "markdown" {
+        if ext == "txt" || ext == "md" || ext == "markdown" || ext == "epub" {
             let title = path.file_stem().and_then(|s| s.to_str()).unwrap_or("未命名").to_string();
             books.push(Book { path: path.to_path_buf(), title, author: String::new(), favorite: false, status: "unread".into() });
         }
@@ -319,7 +320,13 @@ fn detect_chapters(lines: &[String]) -> Vec<Chapter> {
 
 impl App {
     fn open_book(&mut self, path: PathBuf) -> Result<()> {
-        let mut document = Document::open(&path)?;
+        let document_path = if path.extension().and_then(|s| s.to_str()).is_some_and(|ext| ext.eq_ignore_ascii_case("epub")) {
+            let cache_dir = dirs::cache_dir().unwrap_or_else(|| std::env::temp_dir()).join("readtui/epub");
+            epub::extract_to_cache(&path, &cache_dir)?
+        } else {
+            path.clone()
+        };
+        let mut document = Document::open(&document_path)?;
         let chapters = document.detect_chapters()?;
         let saved: Option<(i64, i64, i64)> = self.db.query_row(
             "SELECT line, byte_offset, wrap_offset FROM reading_progress WHERE path=?1",
