@@ -117,3 +117,45 @@ mod tests {
         assert_eq!(page_start(&lines, end, 4, 3), 0);
     }
 }
+
+/// Advance a cursor expressed as (source line, wrapped row within that line).
+pub fn advance(lines: &[String], line: &mut usize, offset: &mut usize, width: usize, rows: usize) {
+    if lines.is_empty() { *line = 0; *offset = 0; return; }
+    let mut remaining = rows.max(1);
+    while remaining > 0 && *line < lines.len() {
+        let count = wrap_line(&lines[*line], width).len();
+        let available = count.saturating_sub(*offset);
+        if remaining < available {
+            *offset += remaining;
+            return;
+        }
+        remaining -= available;
+        if *line + 1 >= lines.len() {
+            *offset = count.saturating_sub(1);
+            return;
+        }
+        *line += 1;
+        *offset = 0;
+    }
+}
+
+/// Retreat a cursor expressed as (source line, wrapped row within that line).
+pub fn retreat(lines: &[String], line: &mut usize, offset: &mut usize, width: usize, rows: usize) {
+    if lines.is_empty() { *line = 0; *offset = 0; return; }
+    let mut remaining = rows.max(1);
+    while remaining > 0 {
+        if *offset > 0 {
+            let step = remaining.min(*offset);
+            *offset -= step;
+            remaining -= step;
+        } else if *line > 0 {
+            *line -= 1;
+            let count = wrap_line(&lines[*line], width).len();
+            let step = remaining.min(count.saturating_sub(1));
+            *offset = count.saturating_sub(1) - step;
+            remaining -= step + 1;
+        } else {
+            break;
+        }
+    }
+}
