@@ -416,8 +416,8 @@ impl App {
         self.books.sort_by(|a,b| {
             let a_path = a.path.to_string_lossy();
             let b_path = b.path.to_string_lossy();
-            let a_time = recent.iter().find(|entry| entry.0 == a_path.as_ref()).map(|entry| entry.1.as_str()).unwrap_or("");
-            let b_time = recent.iter().find(|entry| entry.0 == b_path.as_ref()).map(|entry| entry.1.as_str()).unwrap_or("");
+            let a_time = recent.iter().find(|entry| entry.0.as_str() == a_path.as_ref()).map(|entry| entry.1.as_str()).unwrap_or("");
+            let b_time = recent.iter().find(|entry| entry.0.as_str() == b_path.as_ref()).map(|entry| entry.1.as_str()).unwrap_or("");
             b_time.cmp(a_time).then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
         });
         self.selected = 0;
