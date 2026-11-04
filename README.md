@@ -8,16 +8,21 @@ readtui is designed for distraction-free reading in Windows Terminal, WezTerm, K
 
 The first development milestone provides a working foundation:
 
-- Browse a local library recursively for `.txt`, `.md`, and `.markdown` files.
+- Browse local `.txt`, `.md`, `.markdown`, `.epub`, `.html`, `.htm`, and `.fb2` books recursively.
+- Read large plain-text files through a byte-offset line index instead of loading the entire book into a `Vec<String>`.
+- Convert EPUB spine chapters, Markdown, HTML, and FB2 into a cached plain-text reading stream.
 - Open a book directly from the command line or from the library screen.
 - Decode UTF-8, GB18030/GBK-compatible text, and Big5 fallback.
 - Detect common Chinese and English chapter headings.
 - Navigate with Vim-style keys, visual-row-aware page keys, and an interactive chapter list.
 - Wrap CJK text by terminal cell width and keep common opening/closing punctuation with adjacent text.
-- Persist reading position and bookmarks in SQLite.
-- Search the currently opened text for a literal phrase.
+- Persist byte offsets, source line, wrapped-row offset, bookmarks, annotations, and reading sessions in SQLite, with automatic migration from the original schema.
+- Browse, jump to, and delete bookmarks; save paragraph notes and excerpts.
+- Search the current book or search across the local library.
+- Manage book title, author, tags, favorites, and reading status.
+- Track reading time and a daily reading goal; switch between light and dark themes.
 
-EPUB, full-text indexing, annotations, statistics, configurable typography, and richer library management are planned, but are not implemented yet.
+The current format pipeline extracts EPUB 2/3 spine content and converts Markdown, HTML, and FB2 to cached text. EPUB navigation landmarks and advanced semantic formatting are not yet fully represented.
 
 ## Install
 
@@ -61,19 +66,41 @@ From the library screen, press `a` and enter a file path to open a file outside 
 
 ## Keys
 
+Library:
+
 | Key | Action |
 |---|---|
-| `j` / `k`, `↑` / `↓` | Scroll one visual row |
+| `j` / `k`, arrows | Select a book |
+| `Enter` | Open selected book |
+| `a` | Add/open a file path |
+| `/` | Search across the library |
+| `f` | Toggle favorite |
+| `s` | Cycle unread / reading / finished |
+| `t` | Add a tag |
+| `e` | Edit title and author (`title|author`) |
+| `x` | Clear tags on selected book |
+| `o` | Sort favorites first |
+| `G` | Set daily reading goal in minutes |
+| `c` | Toggle light/dark theme |
+| `S` | Reading statistics |
+| `q` | Quit |
+
+Reader:
+
+| Key | Action |
+|---|---|
+| `j` / `k`, arrows | Scroll one visual row |
 | `Space` / `PageDown` | Move forward one screen |
 | `PageUp` | Move backward one screen |
-| `g` / `Home` | Go to the beginning |
-| `G` / `End` | Go to the end |
+| `g` / `Home`, `G` / `End` | Beginning / end |
 | `n` / `N` | Next / previous detected chapter |
-| `t` | Open the table of contents; use `j` / `k` and `Enter` to jump |
+| `t` | Open the table of contents |
 | `/` | Search the current book |
-| `b` | Add a bookmark at the current position |
-| `q` / `Esc` | Return to library or quit |
-| `?` | Show key hints |
+| `b` / `B` | Add bookmark / browse bookmarks |
+| `m` / `M` | Add paragraph note / browse notes |
+| `c` | Toggle light/dark theme |
+| `S` | Reading statistics |
+| `q` / `Esc` | Return to library |
 
 ## Data locations
 
