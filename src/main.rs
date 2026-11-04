@@ -1170,6 +1170,7 @@ mod tests {
         assert_eq!(chapters.len(), 2);
         assert_eq!(chapters[0].title, "序章");
         assert_eq!(chapters[1].line, 2);
+        drop(document);
         std::fs::remove_file(path).unwrap();
     }
 
