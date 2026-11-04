@@ -276,7 +276,6 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
         let text_width = body.width.max(1) as usize;
         app.viewport_width = text_width;
         app.viewport_height = height;
-        let end = layout::page_end(&reader.lines, reader.top, text_width, height).min(reader.lines.len());
         let visible: Vec<Line> = reader.lines.iter().enumerate().skip(reader.top)
             .flat_map(|(index, line)| {
                 let wrapped = wrap_cjk_line(line, text_width);
@@ -290,7 +289,7 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
         frame.render_widget(content, body);
         let progress = if reader.lines.is_empty() { 0 } else { reader.top * 100 / reader.lines.len() };
         let chapter = reader.chapters.iter().rev().find(|c| c.line <= reader.top).map(|c| c.title.as_str()).unwrap_or("正文");
-        let footer_text = format!("{}  ·  {}  ·  {}%  ·  {}/{} 行  ·  {}", reader.book.title, chapter, progress, end, reader.lines.len(), app.status);
+        let footer_text = format!("{}  ·  {}  ·  {}%  ·  第 {}/{} 行  ·  {}", reader.book.title, chapter, progress, reader.top + 1, reader.lines.len(), app.status);
         let footer = Paragraph::new(footer_text).style(Style::default().fg(Color::Gray));
         frame.render_widget(footer, chunks[2]);
         if app.show_toc {
