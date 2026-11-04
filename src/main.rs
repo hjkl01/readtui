@@ -41,6 +41,9 @@ struct Args {
 struct Book {
     path: PathBuf,
     title: String,
+    author: String,
+    favorite: bool,
+    status: String,
 }
 
 #[derive(Clone)]
@@ -58,6 +61,7 @@ struct Reader {
     chapters: Vec<Chapter>,
     top: usize,
     wrap_offset: usize,
+    session_id: i64,
 }
 
 impl Reader {
@@ -128,6 +132,7 @@ struct App {
     bookmarks: Vec<Bookmark>,
     bookmark_selected: usize,
     annotation_mode: bool,
+    statistics: Option<String>,
     input: Option<String>,
     status: String,
     viewport_width: usize,
@@ -147,7 +152,8 @@ fn main() -> Result<()> {
     let db = Connection::open(data_dir.join("readtui.db"))?;
     init_db(&db)?;
 
-    let books = scan_books(&library_dir);
+    let mut books = scan_books(&library_dir);
+    load_book_metadata(&db, &mut books)?;
     let mut app = App {
         screen: Screen::Library,
         books,
@@ -163,6 +169,7 @@ fn main() -> Result<()> {
         bookmarks: Vec::new(),
         bookmark_selected: 0,
         annotation_mode: false,
+        statistics: None,
         input: None,
         status: "按 Enter 阅读，a 添加文件，? 查看快捷键".into(),
         viewport_width: 80,
@@ -259,11 +266,28 @@ fn scan_books(root: &Path) -> Vec<Book> {
         let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase();
         if ext == "txt" || ext == "md" || ext == "markdown" {
             let title = path.file_stem().and_then(|s| s.to_str()).unwrap_or("未命名").to_string();
-            books.push(Book { path: path.to_path_buf(), title });
+            books.push(Book { path: path.to_path_buf(), title, author: String::new(), favorite: false, status: "unread".into() });
         }
     }
     books.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
     books
+}
+
+fn load_book_metadata(db: &Connection, books: &mut [Book]) -> Result<()> {
+    for book in books {
+        let metadata: Option<(String, String, bool, String)> = db.query_row(
+            "SELECT title,author,favorite,status FROM book_metadata WHERE path=?1",
+            [book.path.to_string_lossy().as_ref()],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get::<_, i64>(2)? != 0, row.get(3)?)),
+        ).optional()?;
+        if let Some((title, author, favorite, status)) = metadata {
+            if !title.trim().is_empty() { book.title = title; }
+            book.author = author;
+            book.favorite = favorite;
+            book.status = status;
+        }
+    }
+    Ok(())
 }
 
 fn decode_text(bytes: &[u8]) -> String {
@@ -311,7 +335,8 @@ impl App {
         let title = path.file_stem().and_then(|s| s.to_str()).unwrap_or("未命名").to_string();
         let book = Book { path: path.clone(), title };
         self.db.execute("INSERT INTO reading_sessions(path) VALUES (?1)", [path.to_string_lossy().as_ref()])?;
-        self.reader = Some(Reader { book, document, chapters, top, wrap_offset: wrap_offset.max(0) as usize });
+        let session_id = self.db.last_insert_rowid();
+        self.reader = Some(Reader { book, document, chapters, top, wrap_offset: wrap_offset.max(0) as usize, session_id });
         self.screen = Screen::Reader;
         self.show_toc = false;
         self.show_bookmarks = false;
@@ -392,6 +417,68 @@ impl App {
         }
         Ok(())
     }
+
+    fn close_reader(&mut self) -> Result<()> {
+        self.save_progress()?;
+        if let Some(reader) = &self.reader {
+            self.db.execute(
+                "UPDATE reading_sessions SET ended_at=CURRENT_TIMESTAMP,
+                 duration_seconds=CAST((julianday('now')-julianday(started_at))*86400 AS INTEGER)
+                 WHERE id=?1 AND ended_at IS NULL",
+                [reader.session_id],
+            )?;
+        }
+        self.reader = None;
+        self.screen = Screen::Library;
+        Ok(())
+    }
+
+    fn show_statistics(&mut self) -> Result<()> {
+        let (total, sessions, today): (i64, i64, i64) = self.db.query_row(
+            "SELECT COALESCE(SUM(duration_seconds),0), COUNT(*),
+             COALESCE(SUM(CASE WHEN date(started_at,'localtime')=date('now','localtime') THEN duration_seconds ELSE 0 END),0)
+             FROM reading_sessions",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+        let hours = total / 3600;
+        let minutes = (total % 3600) / 60;
+        self.statistics = Some(format!(
+            "累计阅读：{hours} 小时 {minutes} 分钟\n阅读会话：{sessions} 次\n今日阅读：{} 分钟\n\n按 Esc 关闭",
+            today / 60
+        ));
+        Ok(())
+    }
+
+    fn toggle_favorite(&mut self) -> Result<()> {
+        if let Some(book) = self.books.get_mut(self.selected) {
+            book.favorite = !book.favorite;
+            self.db.execute(
+                "INSERT INTO book_metadata(path,title,author,favorite,status) VALUES (?1,?2,?3,?4,?5)
+                 ON CONFLICT(path) DO UPDATE SET favorite=excluded.favorite,updated_at=CURRENT_TIMESTAMP",
+                params![book.path.to_string_lossy().as_ref(), book.title, book.author, book.favorite as i64, book.status],
+            )?;
+            self.status = if book.favorite { "已加入收藏".into() } else { "已取消收藏".into() };
+        }
+        Ok(())
+    }
+
+    fn cycle_book_status(&mut self) -> Result<()> {
+        if let Some(book) = self.books.get_mut(self.selected) {
+            book.status = match book.status.as_str() {
+                "unread" => "reading",
+                "reading" => "finished",
+                _ => "unread",
+            }.into();
+            self.db.execute(
+                "INSERT INTO book_metadata(path,title,author,favorite,status) VALUES (?1,?2,?3,?4,?5)
+                 ON CONFLICT(path) DO UPDATE SET status=excluded.status,updated_at=CURRENT_TIMESTAMP",
+                params![book.path.to_string_lossy().as_ref(), book.title, book.author, book.favorite as i64, book.status],
+            )?;
+            self.status = format!("阅读状态：{}", match book.status.as_str() { "reading" => "阅读中", "finished" => "已读完", _ => "未读" });
+        }
+        Ok(())
+    }
 }
 
 fn setup_terminal() -> Result<Terminal<CrosstermBackend<io::Stdout>>> {
@@ -416,6 +503,14 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
         }
     }
     app.save_progress()?;
+    if let Some(reader) = &app.reader {
+        app.db.execute(
+            "UPDATE reading_sessions SET ended_at=CURRENT_TIMESTAMP,
+             duration_seconds=CAST((julianday('now')-julianday(started_at))*86400 AS INTEGER)
+             WHERE id=?1 AND ended_at IS NULL",
+            [reader.session_id],
+        )?;
+    }
     Ok(())
 }
 
@@ -432,7 +527,7 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
     if app.screen == Screen::Library {
         let items: Vec<ListItem> = app.books.iter().map(|book| {
             let path = book.path.strip_prefix(&app.library_dir).unwrap_or(&book.path);
-            ListItem::new(format!("{}   {}", book.title, path.display()))
+            ListItem::new(format!("{}{} [{}] {}   {}", if book.favorite { "★ " } else { "" }, book.title, match book.status.as_str() { "reading" => "阅读中", "finished" => "已读完", _ => "未读" }, if book.author.is_empty() { String::new() } else { format!("· {} ", book.author) }, path.display()))
         }).collect();
         let list = List::new(items).block(Block::default().title(format!("书库 · {} 本", app.books.len())).borders(Borders::ALL))
             .highlight_style(Style::default().bg(Color::DarkGray).fg(Color::White).add_modifier(Modifier::BOLD))
@@ -504,6 +599,11 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
             .style(Style::default().fg(Color::Yellow));
         frame.render_widget(footer, chunks[2]);
     }
+    if let Some(stats) = &app.statistics {
+        let popup = centered_rect(60, 35, area);
+        frame.render_widget(Clear, popup);
+        frame.render_widget(Paragraph::new(stats.as_str()).block(Block::default().title("阅读统计").borders(Borders::ALL)), popup);
+    }
     if let Some(input) = &app.input {
         let popup = centered_rect(60, 20, area);
         frame.render_widget(Clear, popup);
@@ -522,6 +622,10 @@ fn centered_rect(width: u16, height: u16, area: ratatui::layout::Rect) -> ratatu
 }
 
 fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
+    if app.statistics.is_some() {
+        if matches!(key.code, KeyCode::Esc | KeyCode::Char('S')) { app.statistics = None; }
+        return Ok(());
+    }
     if let Some(input) = &mut app.input {
         match key.code {
             KeyCode::Esc => app.input = None,
@@ -556,7 +660,11 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
             KeyCode::Up | KeyCode::Char('k') => { app.selected = app.selected.saturating_sub(1); },
             KeyCode::Enter => { if let Some(book) = app.books.get(app.selected) { app.open_book(book.path.clone())?; } },
             KeyCode::Char('a') => app.input = Some(String::new()),
-            KeyCode::Char('?') => app.status = "↑/k 上移  ↓/j 下移  Enter 阅读  a 添加路径  q 退出".into(),
+            KeyCode::Char('f') => app.toggle_favorite()?,
+            KeyCode::Char('s') => app.cycle_book_status()?,
+            KeyCode::Char('o') => app.books.sort_by(|a,b| b.favorite.cmp(&a.favorite).then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))),
+            KeyCode::Char('S') => app.show_statistics()?,
+            KeyCode::Char('?') => app.status = "↑/k 上移  ↓/j 下移  Enter 阅读  a 添加路径  f 收藏  s 状态  o 收藏优先  S 统计  q 退出".into(),
             _ => {}
         }
         app.list_state.select(if app.books.is_empty() { None } else { Some(app.selected) });
@@ -606,7 +714,7 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
             return Ok(());
         }
         match key.code {
-            KeyCode::Esc | KeyCode::Char('q') => { app.save_progress()?; app.screen = Screen::Library; app.reader = None; },
+            KeyCode::Esc | KeyCode::Char('q') => { app.close_reader()?; },
             KeyCode::Down | KeyCode::Char('j') => if let Some(r) = &mut app.reader {
                 r.advance(app.viewport_width, 1)?;
             },
@@ -621,6 +729,7 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
             },
             KeyCode::Home | KeyCode::Char('g') => if let Some(r) = &mut app.reader { r.top = 0; r.wrap_offset = 0; },
             KeyCode::End | KeyCode::Char('G') => if let Some(r) = &mut app.reader { r.jump_to_line(r.line_count().saturating_sub(1)); },
+            KeyCode::Char('S') => app.show_statistics()?,
             KeyCode::Char('t') => {
                 if let Some(reader) = &app.reader {
                     app.toc_selected = reader.chapters.iter().rposition(|chapter| chapter.line <= reader.top).unwrap_or(0);
