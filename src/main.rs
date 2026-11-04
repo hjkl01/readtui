@@ -1,5 +1,6 @@
 mod document;
 mod epub;
+mod formats;
 mod layout;
 
 use anyhow::{Context, Result};
@@ -308,7 +309,7 @@ fn scan_books(root: &Path) -> Vec<Book> {
         if !entry.file_type().is_file() { continue; }
         let path = entry.path();
         let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase();
-        if ext == "txt" || ext == "md" || ext == "markdown" || ext == "epub" {
+        if matches!(ext.as_str(), "txt" | "md" | "markdown" | "epub" | "html" | "htm" | "fb2") {
             let title = path.file_stem().and_then(|s| s.to_str()).unwrap_or("未命名").to_string();
             books.push(Book { path: path.to_path_buf(), title, author: String::new(), favorite: false, status: "unread".into(), tags: Vec::new() });
         }
@@ -373,11 +374,11 @@ fn detect_chapters(lines: &[String]) -> Vec<Chapter> {
 
 impl App {
     fn open_book(&mut self, path: PathBuf) -> Result<()> {
-        let document_path = if path.extension().and_then(|s| s.to_str()).is_some_and(|ext| ext.eq_ignore_ascii_case("epub")) {
-            let cache_dir = dirs::cache_dir().unwrap_or_else(|| std::env::temp_dir()).join("readtui/epub");
-            epub::extract_to_cache(&path, &cache_dir)?
-        } else {
-            path.clone()
+        let cache_dir = dirs::cache_dir().unwrap_or_else(|| std::env::temp_dir()).join("readtui/formats");
+        let document_path = match path.extension().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase().as_str() {
+            "epub" => epub::extract_to_cache(&path, &cache_dir.join("epub"))?,
+            "md" | "markdown" | "html" | "htm" | "fb2" => formats::to_cache(&path, &cache_dir)?,
+            _ => path.clone(),
         };
         let mut document = Document::open(&document_path)?;
         let chapters = document.detect_chapters()?;
