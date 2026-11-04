@@ -269,13 +269,17 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
             .highlight_style(Style::default().bg(Color::DarkGray).fg(Color::White).add_modifier(Modifier::BOLD))
             .highlight_symbol("▶ ");
         frame.render_stateful_widget(list, chunks[1], &mut app.list_state);
-    } else if let Some(reader) = &app.reader {
+    } else if let Some(reader) = &mut app.reader {
         let body = Layout::default().direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(100)]).split(chunks[1])[0].inner(Margin { vertical: 1, horizontal: 3 });
         let height = body.height.max(1) as usize;
         let text_width = body.width.max(1) as usize;
         app.viewport_width = text_width;
         app.viewport_height = height;
+        if let Some(current_line) = reader.lines.get(reader.top) {
+            let wrapped_rows = wrap_cjk_line(current_line, text_width).len();
+            reader.wrap_offset = reader.wrap_offset.min(wrapped_rows.saturating_sub(1));
+        }
         let visible: Vec<Line> = reader.lines.iter().enumerate().skip(reader.top)
             .flat_map(|(index, line)| {
                 let wrapped = wrap_cjk_line(line, text_width);
