@@ -527,8 +527,10 @@ impl App {
 
     fn show_statistics(&mut self) -> Result<()> {
         let (total, sessions, today): (i64, i64, i64) = self.db.query_row(
-            "SELECT COALESCE(SUM(duration_seconds),0), COUNT(*),
-             COALESCE(SUM(CASE WHEN date(started_at,'localtime')=date('now','localtime') THEN duration_seconds ELSE 0 END),0)
+            "SELECT COALESCE(SUM(CASE WHEN ended_at IS NULL THEN (julianday('now')-julianday(started_at))*86400 ELSE duration_seconds END),0), COUNT(*),
+             COALESCE(SUM(CASE WHEN date(started_at,'localtime')=date('now','localtime') THEN
+               CASE WHEN ended_at IS NULL THEN (julianday('now')-julianday(started_at))*86400 ELSE duration_seconds END
+             ELSE 0 END),0)
              FROM reading_sessions", [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))
         )?;
         let goal = load_setting(&self.db, "daily_goal_minutes")?.parse::<i64>().unwrap_or(30);
@@ -725,7 +727,9 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
             }
             if visible.len() >= height { break; }
         }
-        let content = Paragraph::new(Text::from(visible)).wrap(Wrap { trim: false });
+        let content = Paragraph::new(Text::from(visible))
+            .style(Style::default().fg(if app.theme_light { Color::Black } else { Color::White }))
+            .wrap(Wrap { trim: false });
         frame.render_widget(content, body);
         let progress = if reader.document.byte_len == 0 { 0 } else {
             (reader.document.offset_for_line(reader.top).saturating_mul(100) / reader.document.byte_len) as usize
@@ -827,7 +831,14 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
     }
     if let Some(input) = &mut app.input {
         match key.code {
-            KeyCode::Esc => app.input = None,
+            KeyCode::Esc => {
+                app.input = None;
+                app.annotation_mode = false;
+                app.tag_mode = false;
+                app.metadata_mode = false;
+                app.goal_mode = false;
+                app.library_search_mode = false;
+            },
             KeyCode::Enter => {
                 let value = input.clone(); app.input = None;
                 if app.goal_mode {
