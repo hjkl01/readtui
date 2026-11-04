@@ -51,4 +51,4 @@
 - [ ] Reading streaks
 - [ ] User-defined key bindings and configurable typography
 - [ ] Database backup/import/export and orphan cleanup
-- [ ] Windows/macOS/Linux release automation
+- [x] Windows/macOS/Linux release binary workflow on version tags
