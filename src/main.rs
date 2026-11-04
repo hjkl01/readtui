@@ -799,10 +799,6 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
     }
 }
 
-fn wrap_cjk_line(line: &str, max_width: usize) -> Vec<String> {
-    layout::wrap_line(line, max_width)
-}
-
 fn centered_rect(width: u16, height: u16, area: ratatui::layout::Rect) -> ratatui::layout::Rect {
     let vert = Layout::default().direction(Direction::Vertical).constraints([Constraint::Percentage((100-height)/2), Constraint::Percentage(height), Constraint::Percentage((100-height)/2)]).split(area);
     Layout::default().direction(Direction::Horizontal).constraints([Constraint::Percentage((100-width)/2), Constraint::Percentage(width), Constraint::Percentage((100-width)/2)]).split(vert[1])[1]
