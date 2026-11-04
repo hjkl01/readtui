@@ -3,7 +3,7 @@ use encoding_rs::{BIG5, GB18030};
 use regex::Regex;
 use std::{
     fs::File,
-    io::{BufRead, BufReader, Read, Seek, SeekFrom},
+    io::{BufRead, BufReader, Seek, SeekFrom},
     path::{Path, PathBuf},
 };
 
