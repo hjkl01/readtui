@@ -1,39 +1,58 @@
 # Architecture
 
-## Layers
+## Reading pipeline
 
-```text
-Terminal UI (Ratatui + Crossterm)
-        |
-Application state and commands
-        |
-Reader engine ---- Library services ---- Search/statistics services
-        |                    |
-Format adapters       SQLite repositories
-        |
-Filesystem
-```
+The reader keeps the original book path as its identity. Text formats are converted to cache files only when extraction or markup cleanup is required:
 
-## Module boundaries
+- TXT: read directly from the original file.
+- EPUB: read the OPF manifest and spine, extract XHTML paragraphs in spine order, then cache the extracted text.
+- Markdown: remove common heading, emphasis, link, quote, and fenced-code markup while retaining readable text.
+- HTML: remove scripts/styles and tags, preserve common block boundaries, and decode common named entities.
+- FB2: parse XML and extract title, paragraph, verse, and author blocks.
 
-- `ui`: rendering and terminal interaction only.
-- `reader`: document navigation, layout, pagination, and progress locations.
-- `formats`: format-specific parsing into a common document model.
-- `library`: import, scan, metadata, collections, and file identity.
-- `services`: bookmarks, annotations, search, history, and statistics.
-- `storage`: SQLite schema and repositories.
-- `config`: user preferences and key bindings.
+The cache key includes the source path, file size, and modification time. The original file is never modified.
 
-The current prototype is intentionally compact in `src/main.rs`; modules should be extracted as each domain becomes stable. Do not move SQL, parsing, and rendering into a single long-lived application state type.
+## Large text files
 
-## Performance requirements
+Document::open performs one sequential buffered scan and records the byte offset of each line. It does not retain the full document in memory. The reader loads only the lines needed for the current viewport. Search and chapter detection also use sequential buffered reads.
 
-- Avoid loading very large plain-text files into memory in the production reader. Build a streaming/indexed text source with byte offsets.
-- Do not rebuild the chapter index on every render.
-- Persist progress on meaningful navigation events and on exit, with debouncing for high-frequency input.
-- Keep expensive scanning and indexing off the render loop.
-- Reflow visible content when terminal dimensions or typography settings change.
+Memory use is approximately proportional to the number of lines (one u64 offset per line), plus the current viewport and chapter index. A file containing millions of very short lines still needs a sizable offset index; a disk-backed index is a future optimization.
 
-## Terminal compatibility
+## Stable progress
 
-Crossterm is used as the cross-platform event and terminal backend. Layout must account for full-width CJK characters. Mouse input and terminal image protocols are optional enhancements; core reading must work in a basic UTF-8 terminal.
+The SQLite progress record stores:
+
+- line: source line index, retained for compatibility and quick navigation.
+- byte_offset: byte offset of the current source line in the active text stream.
+- wrap_offset: visual row offset within that source line.
+
+The byte offset is independent of terminal width. On restore, the reader maps it back to the closest indexed line and clamps the wrapped-row offset to the current terminal width.
+
+The initial line-only database is migrated in place by adding missing columns. Existing bookmarks receive the same offset columns.
+
+## Local database
+
+The database is stored under the platform configuration directory in readtui/readtui.db.
+
+Tables:
+
+- reading_progress: last reading location per original book path.
+- bookmarks: saved locations.
+- annotations: paragraph quote and user note.
+- reading_sessions: session start/end and duration.
+- book_metadata: title, author, favorite flag, and reading status.
+- tags / book_tags: user-defined labels.
+- settings: theme and daily reading goal.
+
+Original source files are not copied into SQLite.
+
+## Current limitations
+
+- EPUB navigation documents (NCX/nav), metadata, images, footnotes, and complex layout are not yet exposed in the UI.
+- HTML conversion is intentionally lightweight and is not a full browser DOM renderer.
+- Markdown conversion is text-oriented, not a complete CommonMark renderer.
+- FB2 extraction supports common text blocks; images, binary attachments, and metadata editing are not exposed.
+- Legacy Chinese decoding is line-oriented. UTF-16 and user-selectable encodings are not yet implemented.
+- Cross-library search returns the first match per book and is a sequential scan, not a persistent full-text index.
+- Notes are attached to the current source line; selecting arbitrary text and editing existing annotations are future work.
+- Daily statistics and goal tracking are implemented; weekly/monthly charts, streaks, and export are not yet implemented.
