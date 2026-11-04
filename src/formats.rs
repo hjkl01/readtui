@@ -29,7 +29,7 @@ fn markdown_to_text(source: &str) -> String {
     let link = Regex::new(r"\[([^\]]+)\]\([^)]+\)").unwrap();
     let heading = Regex::new(r"^\s{0,3}#{1,6}\s+").unwrap();
     let quote = Regex::new(r"^\s*>\s?").unwrap();
-    let emphasis = Regex::new(r"(?<!\w)[*_]([^*_]+)[*_](?!\w)").unwrap();
+    let emphasis = Regex::new(r"[*_]([^*_]+)[*_]").unwrap();
     let mut output = Vec::new();
     let mut in_code = false;
     for raw in source.lines() {
