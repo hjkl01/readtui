@@ -17,6 +17,7 @@ use ratatui::{
     Terminal,
 };
 use rusqlite::{params, Connection, OptionalExtension};
+use regex::Regex;
 use std::{
     fs,
     io::{self, stdout},
@@ -381,24 +382,29 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
         let text_width = body.width.max(1) as usize;
         app.viewport_width = text_width;
         app.viewport_height = height;
-        if let Some(current_line) = reader.lines.get(reader.top) {
-            let wrapped_rows = wrap_cjk_line(current_line, text_width).len();
+        let line_count = reader.line_count();
+        if let Ok(current_line) = reader.document.read_line(reader.top) {
+            let wrapped_rows = layout::wrap_line(&current_line, text_width).len();
             reader.wrap_offset = reader.wrap_offset.min(wrapped_rows.saturating_sub(1));
         }
-        let visible: Vec<Line> = reader.lines.iter().enumerate().skip(reader.top)
-            .flat_map(|(index, line)| {
-                let wrapped = wrap_cjk_line(line, text_width);
-                if index == reader.top { wrapped.into_iter().skip(reader.wrap_offset).collect::<Vec<_>>() }
-                else { wrapped }
-            })
-            .take(height)
-            .map(|line| Line::from(Span::raw(line)))
-            .collect();
+        let mut visible = Vec::with_capacity(height);
+        for index in reader.top..line_count {
+            let text = reader.document.read_line(index).unwrap_or_else(|_| "[读取失败]".into());
+            let wrapped = layout::wrap_line(&text, text_width);
+            let rows = if index == reader.top { wrapped.into_iter().skip(reader.wrap_offset).collect::<Vec<_>>() } else { wrapped };
+            for row in rows {
+                visible.push(Line::from(Span::raw(row)));
+                if visible.len() >= height { break; }
+            }
+            if visible.len() >= height { break; }
+        }
         let content = Paragraph::new(Text::from(visible)).wrap(Wrap { trim: false });
         frame.render_widget(content, body);
-        let progress = if reader.lines.is_empty() { 0 } else { reader.top * 100 / reader.lines.len() };
+        let progress = if reader.document.byte_len == 0 { 0 } else {
+            (reader.document.offset_for_line(reader.top).saturating_mul(100) / reader.document.byte_len) as usize
+        };
         let chapter = reader.chapters.iter().rev().find(|c| c.line <= reader.top).map(|c| c.title.as_str()).unwrap_or("正文");
-        let footer_text = format!("{}  ·  {}  ·  {}%  ·  第 {}/{} 行  ·  {}", reader.book.title, chapter, progress, reader.top + 1, reader.lines.len(), app.status);
+        let footer_text = format!("{}  ·  {}  ·  {}%  ·  第 {}/{} 行  ·  {}", reader.book.title, chapter, progress, reader.top + 1, line_count, app.status);
         let footer = Paragraph::new(footer_text).style(Style::default().fg(Color::Gray));
         frame.render_widget(footer, chunks[2]);
         if app.show_toc {
@@ -447,8 +453,8 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
                     if path.is_file() { app.open_book(path)?; }
                     else { app.status = "文件不存在，请输入有效路径".into(); }
                 } else if let Some(reader) = &mut app.reader {
-                    if let Some(pos) = reader.lines.iter().position(|line| line.contains(&value)) {
-                        reader.top = pos; reader.wrap_offset = 0;
+                    if let Some(pos) = reader.document.search(&value, reader.top.saturating_add(1), false)? {
+                        reader.jump_to_line(pos);
                         app.status = format!("找到匹配内容：第 {} 行", pos + 1);
                     } else {
                         app.status = "没有找到匹配内容".into();
@@ -499,19 +505,19 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') => { app.save_progress()?; app.screen = Screen::Library; app.reader = None; },
             KeyCode::Down | KeyCode::Char('j') => if let Some(r) = &mut app.reader {
-                layout::advance(&r.lines, &mut r.top, &mut r.wrap_offset, app.viewport_width, 1);
+                r.advance(app.viewport_width, 1)?;
             },
             KeyCode::Up | KeyCode::Char('k') => if let Some(r) = &mut app.reader {
-                layout::retreat(&r.lines, &mut r.top, &mut r.wrap_offset, app.viewport_width, 1);
+                r.retreat(app.viewport_width, 1)?;
             },
             KeyCode::PageDown | KeyCode::Char(' ') => if let Some(r) = &mut app.reader {
-                layout::advance(&r.lines, &mut r.top, &mut r.wrap_offset, app.viewport_width, app.viewport_height);
+                r.advance(app.viewport_width, app.viewport_height)?;
             },
             KeyCode::PageUp => if let Some(r) = &mut app.reader {
-                layout::retreat(&r.lines, &mut r.top, &mut r.wrap_offset, app.viewport_width, app.viewport_height);
+                r.retreat(app.viewport_width, app.viewport_height)?;
             },
             KeyCode::Home | KeyCode::Char('g') => if let Some(r) = &mut app.reader { r.top = 0; r.wrap_offset = 0; },
-            KeyCode::End | KeyCode::Char('G') => if let Some(r) = &mut app.reader { r.top = r.lines.len().saturating_sub(1); r.wrap_offset = 0; },
+            KeyCode::End | KeyCode::Char('G') => if let Some(r) = &mut app.reader { r.jump_to_line(r.line_count().saturating_sub(1)); },
             KeyCode::Char('t') => {
                 if let Some(reader) = &app.reader {
                     app.toc_selected = reader.chapters.iter().rposition(|chapter| chapter.line <= reader.top).unwrap_or(0);
