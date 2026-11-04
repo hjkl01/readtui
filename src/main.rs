@@ -43,6 +43,15 @@ struct Book {
     title: String,
 }
 
+#[derive(Clone)]
+struct Bookmark {
+    id: i64,
+    line: usize,
+    byte_offset: u64,
+    wrap_offset: usize,
+    note: String,
+}
+
 struct Reader {
     book: Book,
     document: Document,
@@ -115,6 +124,10 @@ struct App {
     should_quit: bool,
     show_toc: bool,
     toc_selected: usize,
+    show_bookmarks: bool,
+    bookmarks: Vec<Bookmark>,
+    bookmark_selected: usize,
+    annotation_mode: bool,
     input: Option<String>,
     status: String,
     viewport_width: usize,
@@ -146,6 +159,10 @@ fn main() -> Result<()> {
         should_quit: false,
         show_toc: false,
         toc_selected: 0,
+        show_bookmarks: false,
+        bookmarks: Vec::new(),
+        bookmark_selected: 0,
+        annotation_mode: false,
         input: None,
         status: "按 Enter 阅读，a 添加文件，? 查看快捷键".into(),
         viewport_width: 80,
@@ -297,6 +314,7 @@ impl App {
         self.reader = Some(Reader { book, document, chapters, top, wrap_offset: wrap_offset.max(0) as usize });
         self.screen = Screen::Reader;
         self.show_toc = false;
+        self.show_bookmarks = false;
         Ok(())
     }
 
@@ -326,6 +344,51 @@ impl App {
                 params![reader.book.path.to_string_lossy().as_ref(), reader.top as i64, offset as i64, reader.wrap_offset as i64],
             )?;
             self.status = "已添加书签".into();
+        }
+        Ok(())
+    }
+
+    fn load_bookmarks(&mut self) -> Result<()> {
+        self.bookmarks.clear();
+        if let Some(reader) = &self.reader {
+            let mut statement = self.db.prepare(
+                "SELECT id,line,byte_offset,wrap_offset,note FROM bookmarks WHERE path=?1 ORDER BY created_at DESC,id DESC"
+            )?;
+            let rows = statement.query_map([reader.book.path.to_string_lossy().as_ref()], |row| {
+                Ok(Bookmark {
+                    id: row.get(0)?,
+                    line: row.get::<_, i64>(1)?.max(0) as usize,
+                    byte_offset: row.get::<_, i64>(2)?.max(0) as u64,
+                    wrap_offset: row.get::<_, i64>(3)?.max(0) as usize,
+                    note: row.get(4)?,
+                })
+            })?;
+            for row in rows { self.bookmarks.push(row?); }
+        }
+        self.bookmark_selected = 0;
+        self.show_bookmarks = true;
+        Ok(())
+    }
+
+    fn add_annotation(&mut self, note: &str) -> Result<()> {
+        if let Some(reader) = &mut self.reader {
+            let quote = reader.document.read_line(reader.top)?;
+            let offset = reader.document.offset_for_line(reader.top);
+            self.db.execute(
+                "INSERT INTO annotations(path,line,byte_offset,quote,note) VALUES (?1,?2,?3,?4,?5)",
+                params![reader.book.path.to_string_lossy().as_ref(), reader.top as i64, offset as i64, quote, note],
+            )?;
+            self.status = "笔记已保存".into();
+        }
+        Ok(())
+    }
+
+    fn delete_selected_bookmark(&mut self) -> Result<()> {
+        if let Some(bookmark) = self.bookmarks.get(self.bookmark_selected) {
+            self.db.execute("DELETE FROM bookmarks WHERE id=?1", [bookmark.id])?;
+            self.bookmarks.remove(self.bookmark_selected);
+            self.bookmark_selected = self.bookmark_selected.min(self.bookmarks.len().saturating_sub(1));
+            self.status = "书签已删除".into();
         }
         Ok(())
     }
@@ -407,6 +470,21 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
         let footer_text = format!("{}  ·  {}  ·  {}%  ·  第 {}/{} 行  ·  {}", reader.book.title, chapter, progress, reader.top + 1, line_count, app.status);
         let footer = Paragraph::new(footer_text).style(Style::default().fg(Color::Gray));
         frame.render_widget(footer, chunks[2]);
+        if app.show_bookmarks {
+            let popup = centered_rect(75, 70, area);
+            frame.render_widget(Clear, popup);
+            let entries: Vec<ListItem> = app.bookmarks.iter().map(|b| {
+                let note = if b.note.is_empty() { String::new() } else { format!(" · {}", b.note) };
+                ListItem::new(format!("第 {:>7} 行{}", b.line + 1, note))
+            }).collect();
+            let list = List::new(entries)
+                .block(Block::default().title("书签 · Enter 跳转 · d 删除 · Esc 关闭").borders(Borders::ALL))
+                .highlight_style(Style::default().bg(Color::DarkGray).fg(Color::White).add_modifier(Modifier::BOLD))
+                .highlight_symbol("▶ ");
+            let mut state = ListState::default();
+            state.select(if app.bookmarks.is_empty() { None } else { Some(app.bookmark_selected.min(app.bookmarks.len()-1)) });
+            frame.render_stateful_widget(list, popup, &mut state);
+        }
         if app.show_toc {
             let popup = centered_rect(70, 70, area);
             frame.render_widget(Clear, popup);
@@ -429,7 +507,8 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
     if let Some(input) = &app.input {
         let popup = centered_rect(60, 20, area);
         frame.render_widget(Clear, popup);
-        frame.render_widget(Paragraph::new(input.as_str()).block(Block::default().title("输入文件路径 / 搜索词").borders(Borders::ALL)), popup);
+        let title = if app.annotation_mode { "为当前段落添加笔记" } else if app.screen == Screen::Reader { "搜索当前书籍" } else { "输入文件路径" };
+        frame.render_widget(Paragraph::new(input.as_str()).block(Block::default().title(title).borders(Borders::ALL)), popup);
     }
 }
 
@@ -448,7 +527,10 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
             KeyCode::Esc => app.input = None,
             KeyCode::Enter => {
                 let value = input.clone(); app.input = None;
-                if app.screen == Screen::Library {
+                if app.annotation_mode {
+                    app.annotation_mode = false;
+                    if !value.trim().is_empty() { app.add_annotation(value.trim())?; }
+                } else if app.screen == Screen::Library {
                     let path = PathBuf::from(value);
                     if path.is_file() { app.open_book(path)?; }
                     else { app.status = "文件不存在，请输入有效路径".into(); }
@@ -479,6 +561,27 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
         }
         app.list_state.select(if app.books.is_empty() { None } else { Some(app.selected) });
     } else {
+        if app.show_bookmarks {
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('B') => app.show_bookmarks = false,
+                KeyCode::Down | KeyCode::Char('j') => {
+                    if !app.bookmarks.is_empty() { app.bookmark_selected = (app.bookmark_selected + 1).min(app.bookmarks.len()-1); }
+                }
+                KeyCode::Up | KeyCode::Char('k') => app.bookmark_selected = app.bookmark_selected.saturating_sub(1),
+                KeyCode::Char('d') => app.delete_selected_bookmark()?,
+                KeyCode::Enter => {
+                    if let Some(bookmark) = app.bookmarks.get(app.bookmark_selected) {
+                        if let Some(reader) = &mut app.reader {
+                            reader.jump_to_line(if bookmark.byte_offset > 0 { reader.document.line_for_offset(bookmark.byte_offset) } else { bookmark.line });
+                            reader.wrap_offset = bookmark.wrap_offset;
+                        }
+                    }
+                    app.show_bookmarks = false;
+                }
+                _ => {}
+            }
+            return Ok(());
+        }
         if app.show_toc {
             let chapter_count = app.reader.as_ref().map(|r| r.chapters.len()).unwrap_or(0);
             match key.code {
@@ -525,6 +628,8 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 app.show_toc = true;
             },
             KeyCode::Char('b') => app.add_bookmark()?,
+            KeyCode::Char('B') => app.load_bookmarks()?,
+            KeyCode::Char('m') => { app.annotation_mode = true; app.input = Some(String::new()); },
             KeyCode::Char('/') => app.input = Some(String::new()),
             KeyCode::Char('n') => if let Some(r) = &mut app.reader {
                 if let Some(next) = r.chapters.iter().find(|c| c.line > r.top) { r.top = next.line; r.wrap_offset = 0; }
@@ -532,7 +637,7 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
             KeyCode::Char('N') => if let Some(r) = &mut app.reader {
                 if let Some(prev) = r.chapters.iter().rev().find(|c| c.line < r.top) { r.top = prev.line; r.wrap_offset = 0; }
             },
-            KeyCode::Char('?') => app.status = "j/k 滚动  Space/PageDown 下一页  PageUp 上一页  t 目录  n/N 章节  b 书签  / 搜索  q 返回".into(),
+            KeyCode::Char('?') => app.status = "j/k 滚动  Space/PageDown 下一页  PageUp 上一页  t 目录  n/N 章节  b 添加书签  B 书签列表  m 笔记  / 搜索  q 返回".into(),
             _ => {}
         }
     }
