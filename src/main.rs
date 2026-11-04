@@ -513,10 +513,10 @@ impl App {
 
     fn show_statistics(&mut self) -> Result<()> {
         let (total, sessions, today): (i64, i64, i64) = self.db.query_row(
-            "SELECT COALESCE(SUM(CASE WHEN ended_at IS NULL THEN (julianday('now')-julianday(started_at))*86400 ELSE duration_seconds END),0), COUNT(*),
-             COALESCE(SUM(CASE WHEN date(started_at,'localtime')=date('now','localtime') THEN
+            "SELECT CAST(COALESCE(SUM(CASE WHEN ended_at IS NULL THEN (julianday('now')-julianday(started_at))*86400 ELSE duration_seconds END),0) AS INTEGER), COUNT(*),
+             CAST(COALESCE(SUM(CASE WHEN date(started_at,'localtime')=date('now','localtime') THEN
                CASE WHEN ended_at IS NULL THEN (julianday('now')-julianday(started_at))*86400 ELSE duration_seconds END
-             ELSE 0 END),0)
+             ELSE 0 END),0) AS INTEGER)
              FROM reading_sessions", [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))
         )?;
         let goal = load_setting(&self.db, "daily_goal_minutes")?.parse::<i64>().unwrap_or(30);
