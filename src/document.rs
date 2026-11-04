@@ -91,6 +91,7 @@ impl Document {
         let regexes: Vec<Regex> = patterns.iter().filter_map(|p| Regex::new(p).ok()).collect();
         let mut chapters = Vec::new();
         let mut reader = BufReader::new(self.file.try_clone()?);
+        reader.seek(SeekFrom::Start(0))?;
         let mut buffer = Vec::with_capacity(4096);
         for line in 0..self.line_count() {
             buffer.clear();
