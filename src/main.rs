@@ -156,11 +156,13 @@ struct App {
     annotation_mode: bool,
     tag_mode: bool,
     metadata_mode: bool,
+    goal_mode: bool,
     library_search_mode: bool,
     show_search_results: bool,
     search_results: Vec<SearchResult>,
     search_selected: usize,
     statistics: Option<String>,
+    theme_light: bool,
     input: Option<String>,
     status: String,
     viewport_width: usize,
@@ -202,11 +204,13 @@ fn main() -> Result<()> {
         annotation_mode: false,
         tag_mode: false,
         metadata_mode: false,
+        goal_mode: false,
         library_search_mode: false,
         show_search_results: false,
         search_results: Vec::new(),
         search_selected: 0,
         statistics: None,
+        theme_light: load_setting(&db, "theme").unwrap_or_else(|_| "dark".into()) == "light",
         input: None,
         status: "按 Enter 阅读，a 添加文件，? 查看快捷键".into(),
         viewport_width: 80,
@@ -272,6 +276,9 @@ fn init_db(db: &Connection) -> Result<()> {
            status TEXT NOT NULL DEFAULT 'unread',
            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
          );
+         CREATE TABLE IF NOT EXISTS settings (
+           key TEXT PRIMARY KEY, value TEXT NOT NULL
+         );
          CREATE TABLE IF NOT EXISTS tags (
            id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE
          );
@@ -308,6 +315,11 @@ fn scan_books(root: &Path) -> Vec<Book> {
     }
     books.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
     books
+}
+
+fn load_setting(db: &Connection, key: &str) -> Result<String> {
+    Ok(db.query_row("SELECT value FROM settings WHERE key=?1", [key], |row| row.get(0))
+        .optional()?.unwrap_or_default())
 }
 
 fn load_book_metadata(db: &Connection, books: &mut [Book]) -> Result<()> {
@@ -517,16 +529,34 @@ impl App {
         let (total, sessions, today): (i64, i64, i64) = self.db.query_row(
             "SELECT COALESCE(SUM(duration_seconds),0), COUNT(*),
              COALESCE(SUM(CASE WHEN date(started_at,'localtime')=date('now','localtime') THEN duration_seconds ELSE 0 END),0)
-             FROM reading_sessions",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+             FROM reading_sessions", [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))
         )?;
+        let goal = load_setting(&self.db, "daily_goal_minutes")?.parse::<i64>().unwrap_or(30);
         let hours = total / 3600;
         let minutes = (total % 3600) / 60;
         self.statistics = Some(format!(
-            "累计阅读：{hours} 小时 {minutes} 分钟\n阅读会话：{sessions} 次\n今日阅读：{} 分钟\n\n按 Esc 关闭",
+            "累计阅读：{hours} 小时 {minutes} 分钟\n阅读会话：{sessions} 次\n今日阅读：{} / {goal} 分钟\n\n按 Esc 关闭",
             today / 60
         ));
+        Ok(())
+    }
+
+    fn toggle_theme(&mut self) -> Result<()> {
+        self.theme_light = !self.theme_light;
+        let theme = if self.theme_light { "light" } else { "dark" };
+        self.db.execute("INSERT INTO settings(key,value) VALUES ('theme',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [theme])?;
+        self.status = format!("已切换{}主题", if self.theme_light { "浅色" } else { "深色" });
+        Ok(())
+    }
+
+    fn set_daily_goal(&mut self, value: &str) -> Result<()> {
+        let minutes = value.trim().parse::<u32>().ok().filter(|v| (1..=1440).contains(v));
+        if let Some(minutes) = minutes {
+            self.db.execute("INSERT INTO settings(key,value) VALUES ('daily_goal_minutes',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [minutes.to_string()])?;
+            self.status = format!("每日阅读目标设为 {minutes} 分钟");
+        } else {
+            self.status = "目标必须是 1 到 1440 之间的分钟数".into();
+        }
         Ok(())
     }
 
@@ -658,7 +688,7 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
     let chunks = Layout::default().direction(Direction::Vertical)
         .constraints([Constraint::Length(3), Constraint::Min(5), Constraint::Length(2)]).split(area);
     let title = Paragraph::new(Line::from(vec![
-        Span::styled(" READTUI ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Span::styled(" READTUI ", Style::default().fg(if app.theme_light { Color::Blue } else { Color::Cyan }).add_modifier(Modifier::BOLD)),
         Span::raw("本地小说阅读器"),
     ])).block(Block::default().borders(Borders::ALL));
     frame.render_widget(title, chunks[0]);
@@ -669,7 +699,7 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
             ListItem::new(format!("{}{} [{}] {}  {}   {}", if book.favorite { "★ " } else { "" }, book.title, match book.status.as_str() { "reading" => "阅读中", "finished" => "已读完", _ => "未读" }, if book.author.is_empty() { String::new() } else { format!("· {} ", book.author) }, book.tags.join(","), path.display())).style(Style::default().fg(if book.tags.is_empty() { Color::White } else { Color::Cyan }))
         }).collect();
         let list = List::new(items).block(Block::default().title(format!("书库 · {} 本", app.books.len())).borders(Borders::ALL))
-            .highlight_style(Style::default().bg(Color::DarkGray).fg(Color::White).add_modifier(Modifier::BOLD))
+            .highlight_style(Style::default().bg(if app.theme_light { Color::Gray } else { Color::DarkGray }).fg(if app.theme_light { Color::Black } else { Color::White }).add_modifier(Modifier::BOLD))
             .highlight_symbol("▶ ");
         frame.render_stateful_widget(list, chunks[1], &mut app.list_state);
     } else if let Some(reader) = &mut app.reader {
@@ -776,7 +806,7 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
     if let Some(input) = &app.input {
         let popup = centered_rect(60, 20, area);
         frame.render_widget(Clear, popup);
-        let title = if app.library_search_mode { "跨书搜索关键词" } else if app.annotation_mode { "为当前段落添加笔记" } else if app.tag_mode { "输入标签名称" } else if app.metadata_mode { "编辑书名|作者（作者可留空）" } else if app.screen == Screen::Reader { "搜索当前书籍" } else { "输入文件路径" };
+        let title = if app.goal_mode { "每日阅读目标（分钟）" } else if app.library_search_mode { "跨书搜索关键词" } else if app.annotation_mode { "为当前段落添加笔记" } else if app.tag_mode { "输入标签名称" } else if app.metadata_mode { "编辑书名|作者（作者可留空）" } else if app.screen == Screen::Reader { "搜索当前书籍" } else { "输入文件路径" };
         frame.render_widget(Paragraph::new(input.as_str()).block(Block::default().title(title).borders(Borders::ALL)), popup);
     }
 }
@@ -800,7 +830,10 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
             KeyCode::Esc => app.input = None,
             KeyCode::Enter => {
                 let value = input.clone(); app.input = None;
-                if app.library_search_mode {
+                if app.goal_mode {
+                    app.goal_mode = false;
+                    app.set_daily_goal(&value)?;
+                } else if app.library_search_mode {
                     app.library_search_mode = false;
                     app.search_library(&value)?;
                 } else if app.annotation_mode {
@@ -864,7 +897,9 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
             KeyCode::Char('x') => app.clear_selected_tags()?,
             KeyCode::Char('o') => app.books.sort_by(|a,b| b.favorite.cmp(&a.favorite).then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))),
             KeyCode::Char('S') => app.show_statistics()?,
-            KeyCode::Char('?') => app.status = "↑/k 上移  ↓/j 下移  Enter 阅读  a 添加路径  / 跨书搜索  f 收藏  s 状态  t 标签  e 编辑元数据  x 清空标签  o 收藏优先  S 统计  q 退出".into(),
+            KeyCode::Char('G') => { app.goal_mode = true; app.input = Some(String::new()); },
+            KeyCode::Char('c') => app.toggle_theme()?,
+            KeyCode::Char('?') => app.status = "↑/k 上移  ↓/j 下移  Enter 阅读  a 添加路径  / 跨书搜索  f 收藏  s 状态  t 标签  e 编辑元数据  x 清空标签  o 收藏优先  G 每日目标  c 主题  S 统计  q 退出".into(),
             _ => {}
         }
         app.list_state.select(if app.books.is_empty() { None } else { Some(app.selected) });
@@ -950,6 +985,7 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
             KeyCode::Home | KeyCode::Char('g') => if let Some(r) = &mut app.reader { r.top = 0; r.wrap_offset = 0; },
             KeyCode::End | KeyCode::Char('G') => if let Some(r) = &mut app.reader { r.jump_to_line(r.line_count().saturating_sub(1)); },
             KeyCode::Char('S') => app.show_statistics()?,
+            KeyCode::Char('c') => app.toggle_theme()?,
             KeyCode::Char('t') => {
                 if let Some(reader) = &app.reader {
                     app.toc_selected = reader.chapters.iter().rposition(|chapter| chapter.line <= reader.top).unwrap_or(0);
