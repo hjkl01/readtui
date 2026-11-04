@@ -831,6 +831,24 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
         }
         return Ok(());
     }
+    if app.show_search_results {
+        match key.code {
+            KeyCode::Esc => app.show_search_results = false,
+            KeyCode::Down | KeyCode::Char('j') => {
+                if !app.search_results.is_empty() { app.search_selected = (app.search_selected + 1).min(app.search_results.len()-1); }
+            }
+            KeyCode::Up | KeyCode::Char('k') => app.search_selected = app.search_selected.saturating_sub(1),
+            KeyCode::Enter => {
+                if let Some(result) = app.search_results.get(app.search_selected).cloned() {
+                    app.open_book(result.path)?;
+                    if let Some(reader) = &mut app.reader { reader.jump_to_line(result.line); }
+                }
+                app.show_search_results = false;
+            }
+            _ => {}
+        }
+        return Ok(());
+    }
     if app.screen == Screen::Library {
         match key.code {
             KeyCode::Char('q') => app.should_quit = true,
@@ -851,24 +869,6 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
         }
         app.list_state.select(if app.books.is_empty() { None } else { Some(app.selected) });
     } else {
-        if app.show_search_results {
-            match key.code {
-                KeyCode::Esc => app.show_search_results = false,
-                KeyCode::Down | KeyCode::Char('j') => {
-                    if !app.search_results.is_empty() { app.search_selected = (app.search_selected + 1).min(app.search_results.len()-1); }
-                }
-                KeyCode::Up | KeyCode::Char('k') => app.search_selected = app.search_selected.saturating_sub(1),
-                KeyCode::Enter => {
-                    if let Some(result) = app.search_results.get(app.search_selected).cloned() {
-                        app.open_book(result.path)?;
-                        if let Some(reader) = &mut app.reader { reader.jump_to_line(result.line); }
-                    }
-                    app.show_search_results = false;
-                }
-                _ => {}
-            }
-            return Ok(());
-        }
         if app.show_annotations {
             match key.code {
                 KeyCode::Esc | KeyCode::Char('M') => app.show_annotations = false,
