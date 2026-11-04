@@ -21,22 +21,28 @@ pub fn wrap_line(line: &str, max_width: usize) -> Vec<String> {
         let ch_width = ch.width().unwrap_or(0);
 
         if width + ch_width > max_width && !current.is_empty() {
-            // Do not leave closing punctuation at the beginning of a row.
+            // Keep closing punctuation with the preceding character when possible.
             if is_closing_punctuation(ch) {
-                current.push(ch);
-                rows.push(std::mem::take(&mut current));
-                width = 0;
-                index += 1;
-                continue;
+                if let Some(previous) = current.pop() {
+                    let previous_width = previous.width().unwrap_or(0);
+                    if !current.is_empty() {
+                        rows.push(std::mem::take(&mut current));
+                    }
+                    current.push(previous);
+                    current.push(ch);
+                    width = previous_width + ch_width;
+                    index += 1;
+                    continue;
+                }
             }
 
             rows.push(std::mem::take(&mut current));
             width = 0;
-            // Do not leave opening punctuation at the end of a row.
+            // Keep an opening punctuation mark with the following character.
             if is_opening_punctuation(ch) && index + 1 < chars.len() {
                 let next = chars[index + 1];
                 let next_width = next.width().unwrap_or(0);
-                if next_width <= max_width {
+                if ch_width + next_width <= max_width {
                     current.push(ch);
                     current.push(next);
                     width = ch_width + next_width;
@@ -78,7 +84,7 @@ mod tests {
     #[test]
     fn keeps_closing_punctuation_with_previous_text() {
         let rows = wrap_line("你好，世界。", 4);
-        assert_eq!(rows, vec!["你好，", "世界。"]);
+        assert_eq!(rows, vec!["你", "好，", "世", "界。"]);
     }
 
     #[test]
