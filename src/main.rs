@@ -363,6 +363,26 @@ fn decode_text(bytes: &[u8]) -> String {
 }
 
 impl App {
+    fn add_book_path(&mut self, path: PathBuf) -> Result<()> {
+        let path = path.canonicalize().unwrap_or(path);
+        if !path.is_file() {
+            self.status = "文件不存在，请输入有效路径".into();
+            return Ok(());
+        }
+        let ext = path.extension().and_then(|value| value.to_str()).unwrap_or("").to_ascii_lowercase();
+        if !matches!(ext.as_str(), "txt" | "md" | "markdown" | "epub" | "html" | "htm" | "fb2") {
+            self.status = format!("暂不支持该文件格式：.{ext}");
+            return Ok(());
+        }
+        if !self.books.iter().any(|book| book.path == path) {
+            let title = path.file_stem().and_then(|value| value.to_str()).unwrap_or("未命名").to_string();
+            self.books.push(Book { path: path.clone(), title, author: String::new(), favorite: false, status: "unread".into(), tags: Vec::new() });
+            self.books.sort_by(|a,b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
+            self.selected = self.books.iter().position(|book| book.path == path).unwrap_or(0);
+        }
+        self.open_book(path)
+    }
+
     fn open_book(&mut self, path: PathBuf) -> Result<()> {
         let document_path = reader_source_path(&path)?;
         let mut document = Document::open(&document_path)?;
@@ -840,8 +860,7 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
                     app.edit_selected_metadata(&value)?;
                 } else if app.screen == Screen::Library {
                     let path = PathBuf::from(value);
-                    if path.is_file() { app.open_book(path)?; }
-                    else { app.status = "文件不存在，请输入有效路径".into(); }
+                    app.add_book_path(path)?;
                 } else if let Some(reader) = &mut app.reader {
                     if let Some(pos) = reader.document.search(&value, reader.top.saturating_add(1), false)? {
                         reader.jump_to_line(pos);
