@@ -23,7 +23,8 @@
 - [x] Tags, favorites, and unread/reading/finished status
 - [ ] Collections and tag-based filtering
 - [ ] Duplicate detection and missing-file relinking
-- [ ] Recent books and advanced sorting/filtering
+- [x] Recent books sorting and favorites-first sorting
+- [ ] Status/tag filters and multi-column sorting
 
 ## Phase 3 — Reading tools
 
@@ -33,7 +34,7 @@
 - [x] Annotation editing and Markdown export
 - [ ] Chapter-only search
 - [ ] Configurable chapter detection rules
-- [ ] Stable progress locations across reflow
+- [ ] Exact character-column restoration within a source line after reflow
 
 ## Phase 4 — Formats
 
