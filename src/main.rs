@@ -56,6 +56,15 @@ struct Bookmark {
     note: String,
 }
 
+#[derive(Clone)]
+struct Annotation {
+    id: i64,
+    line: usize,
+    byte_offset: u64,
+    quote: String,
+    note: String,
+}
+
 struct Reader {
     book: Book,
     document: Document,
@@ -132,6 +141,9 @@ struct App {
     show_bookmarks: bool,
     bookmarks: Vec<Bookmark>,
     bookmark_selected: usize,
+    show_annotations: bool,
+    annotations: Vec<Annotation>,
+    annotation_selected: usize,
     annotation_mode: bool,
     statistics: Option<String>,
     input: Option<String>,
@@ -169,6 +181,9 @@ fn main() -> Result<()> {
         show_bookmarks: false,
         bookmarks: Vec::new(),
         bookmark_selected: 0,
+        show_annotations: false,
+        annotations: Vec::new(),
+        annotation_selected: 0,
         annotation_mode: false,
         statistics: None,
         input: None,
@@ -415,6 +430,38 @@ impl App {
         Ok(())
     }
 
+    fn load_annotations(&mut self) -> Result<()> {
+        self.annotations.clear();
+        if let Some(reader) = &self.reader {
+            let mut statement = self.db.prepare(
+                "SELECT id,line,byte_offset,quote,note FROM annotations WHERE path=?1 ORDER BY created_at DESC,id DESC"
+            )?;
+            let rows = statement.query_map([reader.book.path.to_string_lossy().as_ref()], |row| {
+                Ok(Annotation {
+                    id: row.get(0)?,
+                    line: row.get::<_, i64>(1)?.max(0) as usize,
+                    byte_offset: row.get::<_, i64>(2)?.max(0) as u64,
+                    quote: row.get(3)?,
+                    note: row.get(4)?,
+                })
+            })?;
+            for row in rows { self.annotations.push(row?); }
+        }
+        self.annotation_selected = 0;
+        self.show_annotations = true;
+        Ok(())
+    }
+
+    fn delete_selected_annotation(&mut self) -> Result<()> {
+        if let Some(annotation) = self.annotations.get(self.annotation_selected) {
+            self.db.execute("DELETE FROM annotations WHERE id=?1", [annotation.id])?;
+            self.annotations.remove(self.annotation_selected);
+            self.annotation_selected = self.annotation_selected.min(self.annotations.len().saturating_sub(1));
+            self.status = "笔记已删除".into();
+        }
+        Ok(())
+    }
+
     fn delete_selected_bookmark(&mut self) -> Result<()> {
         if let Some(bookmark) = self.bookmarks.get(self.bookmark_selected) {
             self.db.execute("DELETE FROM bookmarks WHERE id=?1", [bookmark.id])?;
@@ -572,6 +619,21 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
         let footer_text = format!("{}  ·  {}  ·  {}%  ·  第 {}/{} 行  ·  {}", reader.book.title, chapter, progress, reader.top + 1, line_count, app.status);
         let footer = Paragraph::new(footer_text).style(Style::default().fg(Color::Gray));
         frame.render_widget(footer, chunks[2]);
+        if app.show_annotations {
+            let popup = centered_rect(80, 75, area);
+            frame.render_widget(Clear, popup);
+            let entries: Vec<ListItem> = app.annotations.iter().map(|a| {
+                let quote = a.quote.chars().take(42).collect::<String>();
+                ListItem::new(format!("第 {} 行  {}  — {}", a.line + 1, quote, a.note))
+            }).collect();
+            let list = List::new(entries)
+                .block(Block::default().title("笔记摘录 · Enter 跳转 · d 删除 · Esc 关闭").borders(Borders::ALL))
+                .highlight_style(Style::default().bg(Color::DarkGray).fg(Color::White).add_modifier(Modifier::BOLD))
+                .highlight_symbol("▶ ");
+            let mut state = ListState::default();
+            state.select(if app.annotations.is_empty() { None } else { Some(app.annotation_selected.min(app.annotations.len()-1)) });
+            frame.render_stateful_widget(list, popup, &mut state);
+        }
         if app.show_bookmarks {
             let popup = centered_rect(75, 70, area);
             frame.render_widget(Clear, popup);
@@ -676,6 +738,26 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
         }
         app.list_state.select(if app.books.is_empty() { None } else { Some(app.selected) });
     } else {
+        if app.show_annotations {
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('M') => app.show_annotations = false,
+                KeyCode::Down | KeyCode::Char('j') => {
+                    if !app.annotations.is_empty() { app.annotation_selected = (app.annotation_selected + 1).min(app.annotations.len()-1); }
+                }
+                KeyCode::Up | KeyCode::Char('k') => app.annotation_selected = app.annotation_selected.saturating_sub(1),
+                KeyCode::Char('d') => app.delete_selected_annotation()?,
+                KeyCode::Enter => {
+                    if let Some(annotation) = app.annotations.get(app.annotation_selected) {
+                        if let Some(reader) = &mut app.reader {
+                            reader.jump_to_line(if annotation.byte_offset > 0 { reader.document.line_for_offset(annotation.byte_offset) } else { annotation.line });
+                        }
+                    }
+                    app.show_annotations = false;
+                }
+                _ => {}
+            }
+            return Ok(());
+        }
         if app.show_bookmarks {
             match key.code {
                 KeyCode::Esc | KeyCode::Char('B') => app.show_bookmarks = false,
@@ -745,6 +827,7 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
             },
             KeyCode::Char('b') => app.add_bookmark()?,
             KeyCode::Char('B') => app.load_bookmarks()?,
+            KeyCode::Char('M') => app.load_annotations()?,
             KeyCode::Char('m') => { app.annotation_mode = true; app.input = Some(String::new()); },
             KeyCode::Char('/') => app.input = Some(String::new()),
             KeyCode::Char('n') => if let Some(r) = &mut app.reader {
@@ -753,7 +836,7 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
             KeyCode::Char('N') => if let Some(r) = &mut app.reader {
                 if let Some(prev) = r.chapters.iter().rev().find(|c| c.line < r.top) { r.top = prev.line; r.wrap_offset = 0; }
             },
-            KeyCode::Char('?') => app.status = "j/k 滚动  Space/PageDown 下一页  PageUp 上一页  t 目录  n/N 章节  b 添加书签  B 书签列表  m 笔记  / 搜索  q 返回".into(),
+            KeyCode::Char('?') => app.status = "j/k 滚动  Space/PageDown 下一页  PageUp 上一页  t 目录  n/N 章节  b 添加书签  B 书签列表  m 添加笔记  M 笔记列表  / 搜索  q 返回".into(),
             _ => {}
         }
     }
