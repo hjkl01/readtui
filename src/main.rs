@@ -19,7 +19,6 @@ use ratatui::{
     Terminal,
 };
 use rusqlite::{params, Connection, OptionalExtension};
-use regex::Regex;
 use std::{
     fs,
     io::{self, stdout},
@@ -352,25 +351,6 @@ fn decode_text(bytes: &[u8]) -> String {
     if !had_errors { return decoded.into_owned(); }
     let (decoded, _, _) = encoding_rs::BIG5.decode(bytes);
     decoded.into_owned()
-}
-
-fn detect_chapters(lines: &[String]) -> Vec<Chapter> {
-    let patterns = [
-        r"^\s*第[零〇一二三四五六七八九十百千万两0-9０-９]+[章节回卷集部篇].*",
-        r"^\s*(序章|楔子|引子|序言|后记|尾声|终章)\s*$",
-        r"^\s*Chapter\s+[0-9IVXivx]+.*",
-        r"^\s*卷[一二三四五六七八九十0-9]+.*",
-    ];
-    let regexes: Vec<Regex> = patterns.iter().filter_map(|p| Regex::new(p).ok()).collect();
-    let mut chapters = Vec::new();
-    for (idx, line) in lines.iter().enumerate() {
-        let trimmed = line.trim();
-        if !trimmed.is_empty() && regexes.iter().any(|r| r.is_match(trimmed)) {
-            chapters.push(Chapter { title: trimmed.to_string(), line: idx });
-        }
-    }
-    if chapters.is_empty() { chapters.push(Chapter { title: "正文".into(), line: 0 }); }
-    chapters
 }
 
 impl App {
@@ -1029,11 +1009,14 @@ mod tests {
 
     #[test]
     fn recognizes_chinese_chapters() {
-        let lines = vec!["序章".to_string(), "正文".to_string(), "第一百零二章 风起".to_string()];
-        let chapters = detect_chapters(&lines);
+        let path = std::env::temp_dir().join(format!("readtui-chapters-{}.txt", std::process::id()));
+        std::fs::write(&path, "序章\n正文\n第一百零二章 风起").unwrap();
+        let mut document = Document::open(&path).unwrap();
+        let chapters = document.detect_chapters().unwrap();
         assert_eq!(chapters.len(), 2);
         assert_eq!(chapters[0].title, "序章");
         assert_eq!(chapters[1].line, 2);
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]
