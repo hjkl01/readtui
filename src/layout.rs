@@ -65,34 +65,6 @@ fn is_opening_punctuation(ch: char) -> bool {
     matches!(ch, '（' | '【' | '《' | '「' | '『' | '〈' | '〔' | '“' | '‘' | '(')
 }
 
-/// Number of source lines consumed by one visual page.
-pub fn page_end(lines: &[String], start: usize, width: usize, height: usize) -> usize {
-    if lines.is_empty() {
-        return 0;
-    }
-    let mut rows = 0usize;
-    let mut line = start.min(lines.len() - 1);
-    while line < lines.len() && rows < height.max(1) {
-        rows += wrap_line(&lines[line], width).len();
-        line += 1;
-    }
-    line.max(start.saturating_add(1))
-}
-
-/// Find the source-line start of the previous visual page.
-pub fn page_start(lines: &[String], end: usize, width: usize, height: usize) -> usize {
-    if lines.is_empty() || end == 0 {
-        return 0;
-    }
-    let mut rows = 0usize;
-    let mut line = end.min(lines.len());
-    while line > 0 && rows < height.max(1) {
-        line -= 1;
-        rows += wrap_line(&lines[line], width).len();
-    }
-    line
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -110,11 +82,13 @@ mod tests {
     }
 
     #[test]
-    fn page_navigation_uses_visual_rows() {
+    fn cursor_navigation_uses_visual_rows() {
         let lines = vec!["短行".into(), "很长很长很长的一行".into(), "尾行".into()];
-        let end = page_end(&lines, 0, 4, 3);
-        assert_eq!(end, 2);
-        assert_eq!(page_start(&lines, end, 4, 3), 0);
+        let (mut line, mut offset) = (0, 0);
+        advance(&lines, &mut line, &mut offset, 4, 3);
+        assert_eq!((line, offset), (1, 2));
+        retreat(&lines, &mut line, &mut offset, 4, 3);
+        assert_eq!((line, offset), (0, 0));
     }
 }
 
