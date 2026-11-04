@@ -1,3 +1,5 @@
+mod layout;
+
 use anyhow::{Context, Result};
 use clap::Parser;
 use crossterm::{
@@ -72,6 +74,8 @@ struct App {
     toc_selected: usize,
     input: Option<String>,
     status: String,
+    viewport_width: usize,
+    viewport_height: usize,
 }
 
 fn main() -> Result<()> {
@@ -101,6 +105,8 @@ fn main() -> Result<()> {
         toc_selected: 0,
         input: None,
         status: "按 Enter 阅读，a 添加文件，? 查看快捷键".into(),
+        viewport_width: 80,
+        viewport_height: 20,
     };
 
     app.list_state.select(if app.books.is_empty() { None } else { Some(0) });
@@ -267,8 +273,10 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
         let body = Layout::default().direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(100)]).split(chunks[1])[0].inner(Margin { vertical: 1, horizontal: 3 });
         let height = body.height.max(1) as usize;
-        let end = (reader.top + height).min(reader.lines.len());
         let text_width = body.width.max(1) as usize;
+        app.viewport_width = text_width;
+        app.viewport_height = height;
+        let end = layout::page_end(&reader.lines, reader.top, text_width, height).min(reader.lines.len());
         let visible: Vec<Line> = reader.lines.iter().skip(reader.top)
             .flat_map(|line| wrap_cjk_line(line, text_width))
             .take(height)
@@ -308,22 +316,7 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
 }
 
 fn wrap_cjk_line(line: &str, max_width: usize) -> Vec<String> {
-    let max_width = max_width.max(1);
-    if line.is_empty() { return vec![String::new()]; }
-    let mut result = Vec::new();
-    let mut current = String::new();
-    let mut width = 0usize;
-    for ch in line.chars() {
-        let ch_width = ch.width().unwrap_or(0);
-        if width + ch_width > max_width && !current.is_empty() {
-            result.push(std::mem::take(&mut current));
-            width = 0;
-        }
-        current.push(ch);
-        width += ch_width;
-    }
-    if !current.is_empty() { result.push(current); }
-    result
+    layout::wrap_line(line, max_width)
 }
 
 fn centered_rect(width: u16, height: u16, area: ratatui::layout::Rect) -> ratatui::layout::Rect {
@@ -395,8 +388,13 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
             KeyCode::Esc | KeyCode::Char('q') => { app.save_progress()?; app.screen = Screen::Library; app.reader = None; },
             KeyCode::Down | KeyCode::Char('j') => if let Some(r) = &mut app.reader { r.top = (r.top + 1).min(r.lines.len().saturating_sub(1)); },
             KeyCode::Up | KeyCode::Char('k') => if let Some(r) = &mut app.reader { r.top = r.top.saturating_sub(1); },
-            KeyCode::PageDown | KeyCode::Char(' ') => if let Some(r) = &mut app.reader { r.top = (r.top + 20).min(r.lines.len().saturating_sub(1)); },
-            KeyCode::PageUp => if let Some(r) = &mut app.reader { r.top = r.top.saturating_sub(20); },
+            KeyCode::PageDown | KeyCode::Char(' ') => if let Some(r) = &mut app.reader {
+                let next = layout::page_end(&r.lines, r.top, app.viewport_width, app.viewport_height);
+                r.top = next.min(r.lines.len().saturating_sub(1));
+            },
+            KeyCode::PageUp => if let Some(r) = &mut app.reader {
+                r.top = layout::page_start(&r.lines, r.top, app.viewport_width, app.viewport_height);
+            },
             KeyCode::Home | KeyCode::Char('g') => if let Some(r) = &mut app.reader { r.top = 0; },
             KeyCode::End | KeyCode::Char('G') => if let Some(r) = &mut app.reader { r.top = r.lines.len().saturating_sub(1); },
             KeyCode::Char('t') => {
