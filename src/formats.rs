@@ -32,9 +32,10 @@ fn markdown_to_text(source: &str) -> String {
     let emphasis = Regex::new(r"[*_]([^*_]+)[*_]").unwrap();
     let mut output = Vec::new();
     let mut in_code = false;
+    let fence = char::from(96).to_string().repeat(3);
     for raw in source.lines() {
         let trimmed = raw.trim_start();
-        if trimmed.starts_with("~~~") || trimmed.starts_with(char::from(96)) { in_code = !in_code; continue; }
+        if trimmed.starts_with("~~~") || trimmed.starts_with(&fence) { in_code = !in_code; continue; }
         if in_code { output.push(raw.to_string()); continue; }
         let mut line = link.replace_all(raw, "$1").into_owned();
         line = heading.replace(&line, "").into_owned();
