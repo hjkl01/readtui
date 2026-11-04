@@ -111,8 +111,9 @@ Reader:
 
 - Library: `~/Books` by default.
 - Database: `$XDG_CONFIG_HOME/readtui/readtui.db` on Linux, or the platform configuration directory returned by `dirs`.
+- Extracted format cache: the platform cache directory under `readtui/formats`.
 
-Original book files are never copied into the database. SQLite stores reading positions, bookmarks, and session records.
+Original book files are never copied into the database. SQLite stores reading positions, bookmarks, notes, metadata, tags, settings, and session records. EPUB/Markdown/HTML/FB2 extraction is cached separately; cache files can be regenerated from the originals.
 
 ## Development
 
