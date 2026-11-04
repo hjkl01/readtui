@@ -630,19 +630,24 @@ impl App {
     }
 
     fn show_statistics(&mut self) -> Result<()> {
-        let (total, sessions, today): (i64, i64, i64) = self.db.query_row(
-            "SELECT CAST(COALESCE(SUM(CASE WHEN ended_at IS NULL THEN (julianday('now')-julianday(started_at))*86400 ELSE duration_seconds END),0) AS INTEGER), COUNT(*),
+        let (total, sessions, today, week, month): (i64, i64, i64, i64, i64) = self.db.query_row(
+            "SELECT
+             CAST(COALESCE(SUM(CASE WHEN ended_at IS NULL THEN (julianday('now')-julianday(started_at))*86400 ELSE duration_seconds END),0) AS INTEGER),
+             COUNT(*),
              CAST(COALESCE(SUM(CASE WHEN date(started_at,'localtime')=date('now','localtime') THEN
-               CASE WHEN ended_at IS NULL THEN (julianday('now')-julianday(started_at))*86400 ELSE duration_seconds END
-             ELSE 0 END),0) AS INTEGER)
-             FROM reading_sessions", [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+               CASE WHEN ended_at IS NULL THEN (julianday('now')-julianday(started_at))*86400 ELSE duration_seconds END ELSE 0 END),0) AS INTEGER),
+             CAST(COALESCE(SUM(CASE WHEN date(started_at,'localtime')>=date('now','localtime','-6 days') THEN
+               CASE WHEN ended_at IS NULL THEN (julianday('now')-julianday(started_at))*86400 ELSE duration_seconds END ELSE 0 END),0) AS INTEGER),
+             CAST(COALESCE(SUM(CASE WHEN date(started_at,'localtime')>=date('now','localtime','start of month') THEN
+               CASE WHEN ended_at IS NULL THEN (julianday('now')-julianday(started_at))*86400 ELSE duration_seconds END ELSE 0 END),0) AS INTEGER)
+             FROM reading_sessions", [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?))
         )?;
         let goal = load_setting(&self.db, "daily_goal_minutes")?.parse::<i64>().unwrap_or(30);
         let hours = total / 3600;
         let minutes = (total % 3600) / 60;
         self.statistics = Some(format!(
-            "累计阅读：{hours} 小时 {minutes} 分钟\n阅读会话：{sessions} 次\n今日阅读：{} / {goal} 分钟\n\n按 Esc 关闭",
-            today / 60
+            "累计阅读：{hours} 小时 {minutes} 分钟\n阅读会话：{sessions} 次\n今日：{} 分钟 / 目标 {goal} 分钟\n近 7 天：{} 分钟\n本月：{} 分钟\n\n按 Esc 关闭",
+            today / 60, week / 60, month / 60
         ));
         Ok(())
     }
