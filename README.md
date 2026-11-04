@@ -72,7 +72,9 @@ Library:
 |---|---|
 | `j` / `k`, arrows | Select a book |
 | `Enter` | Open selected book |
-| `a` | Add/open a file path |
+| `a` | Add/open an external file path (persisted in the library) |
+| `A` | Import a directory recursively |
+| `r` | Rescan the library |
 | `/` | Search across the library |
 | `f` | Toggle favorite |
 | `s` | Cycle unread / reading / finished |
@@ -80,9 +82,10 @@ Library:
 | `e` | Edit title and author (`title|author`) |
 | `x` | Clear tags on selected book |
 | `o` | Sort favorites first |
+| `R` | Sort by recent reading progress |
 | `G` | Set daily reading goal in minutes |
 | `c` | Toggle light/dark theme |
-| `S` | Reading statistics |
+| `S` | Reading statistics (today, rolling 7 days, month, total) |
 | `q` | Quit |
 
 Reader:
@@ -98,6 +101,8 @@ Reader:
 | `/` | Search the current book |
 | `b` / `B` | Add bookmark / browse bookmarks |
 | `m` / `M` | Add paragraph note / browse notes |
+| `e` / `d` in notes | Edit / delete selected note |
+| `E` | Export notes and bookmarks to Markdown |
 | `c` | Toggle light/dark theme |
 | `S` | Reading statistics |
 | `q` / `Esc` | Return to library |
