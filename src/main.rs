@@ -185,6 +185,7 @@ fn main() -> Result<()> {
 
     let mut books = scan_books(&library_dir);
     load_book_metadata(&db, &mut books)?;
+    let theme_light = load_setting(&db, "theme").unwrap_or_else(|_| "dark".into()) == "light";
     let mut app = App {
         screen: Screen::Library,
         books,
@@ -211,7 +212,7 @@ fn main() -> Result<()> {
         search_results: Vec::new(),
         search_selected: 0,
         statistics: None,
-        theme_light: load_setting(&db, "theme").unwrap_or_else(|_| "dark".into()) == "light",
+        theme_light,
         input: None,
         status: "按 Enter 阅读，a 添加文件，? 查看快捷键".into(),
         viewport_width: 80,
