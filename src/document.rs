@@ -90,15 +90,14 @@ impl Document {
         ];
         let regexes: Vec<Regex> = patterns.iter().filter_map(|p| Regex::new(p).ok()).collect();
         let mut chapters = Vec::new();
+        let mut reader = BufReader::new(self.file.try_clone()?);
+        let mut buffer = Vec::with_capacity(4096);
         for line in 0..self.line_count() {
-            let text = self.read_line(line)?;
-            let title = text.trim();
-            if !title.is_empty() && regexes.iter().any(|regex| regex.is_match(title)) {
-                chapters.push(Chapter {
-                    title: title.to_string(),
-                    line,
-                    byte_offset: self.offset_for_line(line),
-                });
+            buffer.clear();
+            reader.read_until(b'\n', &mut buffer)?;
+            let title = decode_line(&buffer).trim().to_string();
+            if !title.is_empty() && regexes.iter().any(|regex| regex.is_match(&title)) {
+                chapters.push(Chapter { title, line, byte_offset: self.offset_for_line(line) });
             }
         }
         if chapters.is_empty() && self.line_count() > 0 {
@@ -108,14 +107,16 @@ impl Document {
     }
 
     pub fn search(&mut self, query: &str, from_line: usize, case_sensitive: bool) -> Result<Option<usize>> {
-        if query.is_empty() { return Ok(None); }
+        if query.is_empty() || from_line >= self.line_count() { return Ok(None); }
+        let mut reader = BufReader::new(self.file.try_clone()?);
+        reader.seek(SeekFrom::Start(self.offset_for_line(from_line)))?;
+        let mut buffer = Vec::with_capacity(4096);
         for line in from_line..self.line_count() {
-            let text = self.read_line(line)?;
-            let found = if case_sensitive {
-                text.contains(query)
-            } else {
-                text.to_lowercase().contains(&query.to_lowercase())
-            };
+            buffer.clear();
+            if reader.read_until(b'\n', &mut buffer)? == 0 { break; }
+            let text = decode_line(&buffer);
+            let found = if case_sensitive { text.contains(query) }
+                else { text.to_lowercase().contains(&query.to_lowercase()) };
             if found { return Ok(Some(line)); }
         }
         Ok(None)
