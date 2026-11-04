@@ -154,6 +154,8 @@ struct App {
     annotations: Vec<Annotation>,
     annotation_selected: usize,
     annotation_mode: bool,
+    annotation_edit_mode: bool,
+    export_mode: bool,
     tag_mode: bool,
     metadata_mode: bool,
     goal_mode: bool,
@@ -204,6 +206,8 @@ fn main() -> Result<()> {
         annotations: Vec::new(),
         annotation_selected: 0,
         annotation_mode: false,
+        annotation_edit_mode: false,
+        export_mode: false,
         tag_mode: false,
         metadata_mode: false,
         goal_mode: false,
@@ -516,6 +520,47 @@ impl App {
         Ok(())
     }
 
+    fn edit_selected_annotation(&mut self, note: &str) -> Result<()> {
+        if let Some(annotation) = self.annotations.get(self.annotation_selected) {
+            self.db.execute("UPDATE annotations SET note=?1 WHERE id=?2", params![note, annotation.id])?;
+            self.annotations[self.annotation_selected].note = note.to_string();
+            self.status = "笔记已更新".into();
+        }
+        Ok(())
+    }
+
+    fn export_book_notes(&mut self, target: &str) -> Result<()> {
+        let Some(reader) = &self.reader else { return Ok(()); };
+        let path = reader.book.path.to_string_lossy().to_string();
+        let title = reader.book.title.clone();
+        let mut output = format!("# {title}\n\n来源：{path}\n\n");
+        {
+            let mut statement = self.db.prepare("SELECT line,quote,note,created_at FROM annotations WHERE path=?1 ORDER BY line")?;
+            let rows = statement.query_map([&path], |row| Ok((
+                row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?
+            )))?;
+            output.push_str("## 笔记与摘录\n\n");
+            for row in rows {
+                let (line, quote, note, created) = row?;
+                output.push_str(&format!("### 第 {} 行 · {}\n\n> {}\n\n{}\n\n", line + 1, created, quote, note));
+            }
+        }
+        {
+            let mut statement = self.db.prepare("SELECT line,note,created_at FROM bookmarks WHERE path=?1 ORDER BY line")?;
+            let rows = statement.query_map([&path], |row| Ok((
+                row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?
+            )))?;
+            output.push_str("## 书签\n\n");
+            for row in rows {
+                let (line, note, created) = row?;
+                output.push_str(&format!("- 第 {} 行 · {} {}\n", line + 1, created, note));
+            }
+        }
+        fs::write(target, output)?;
+        self.status = format!("笔记和书签已导出到 {target}");
+        Ok(())
+    }
+
     fn delete_selected_annotation(&mut self) -> Result<()> {
         if let Some(annotation) = self.annotations.get(self.annotation_selected) {
             self.db.execute("DELETE FROM annotations WHERE id=?1", [annotation.id])?;
@@ -770,7 +815,7 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
                 ListItem::new(format!("第 {} 行  {}  — {}", a.line + 1, quote, a.note))
             }).collect();
             let list = List::new(entries)
-                .block(Block::default().title("笔记摘录 · Enter 跳转 · d 删除 · Esc 关闭").borders(Borders::ALL))
+                .block(Block::default().title("笔记摘录 · Enter 跳转 · e 编辑 · d 删除 · Esc 关闭").borders(Borders::ALL))
                 .highlight_style(Style::default().bg(Color::DarkGray).fg(Color::White).add_modifier(Modifier::BOLD))
                 .highlight_symbol("▶ ");
             let mut state = ListState::default();
@@ -834,7 +879,7 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
     if let Some(input) = &app.input {
         let popup = centered_rect(60, 20, area);
         frame.render_widget(Clear, popup);
-        let title = if app.goal_mode { "每日阅读目标（分钟）" } else if app.library_search_mode { "跨书搜索关键词" } else if app.annotation_mode { "为当前段落添加笔记" } else if app.tag_mode { "输入标签名称" } else if app.metadata_mode { "编辑书名|作者（作者可留空）" } else if app.screen == Screen::Reader { "搜索当前书籍" } else { "输入文件路径" };
+        let title = if app.export_mode { "导出笔记/书签的 Markdown 文件路径" } else if app.annotation_edit_mode { "编辑笔记内容" } else if app.goal_mode { "每日阅读目标（分钟）" } else if app.library_search_mode { "跨书搜索关键词" } else if app.annotation_mode { "为当前段落添加笔记" } else if app.tag_mode { "输入标签名称" } else if app.metadata_mode { "编辑书名|作者（作者可留空）" } else if app.screen == Screen::Reader { "搜索当前书籍" } else { "输入文件路径" };
         frame.render_widget(Paragraph::new(input.as_str()).block(Block::default().title(title).borders(Borders::ALL)), popup);
     }
 }
@@ -854,6 +899,8 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
             KeyCode::Esc => {
                 app.input = None;
                 app.annotation_mode = false;
+                app.annotation_edit_mode = false;
+                app.export_mode = false;
                 app.tag_mode = false;
                 app.metadata_mode = false;
                 app.goal_mode = false;
@@ -861,7 +908,13 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
             },
             KeyCode::Enter => {
                 let value = input.clone(); app.input = None;
-                if app.goal_mode {
+                if app.export_mode {
+                    app.export_mode = false;
+                    app.export_book_notes(&value)?;
+                } else if app.annotation_edit_mode {
+                    app.annotation_edit_mode = false;
+                    app.edit_selected_annotation(&value)?;
+                } else if app.goal_mode {
                     app.goal_mode = false;
                     app.set_daily_goal(&value)?;
                 } else if app.library_search_mode {
@@ -942,6 +995,12 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 }
                 KeyCode::Up | KeyCode::Char('k') => app.annotation_selected = app.annotation_selected.saturating_sub(1),
                 KeyCode::Char('d') => app.delete_selected_annotation()?,
+                KeyCode::Char('e') => {
+                    if let Some(annotation) = app.annotations.get(app.annotation_selected) {
+                        app.annotation_edit_mode = true;
+                        app.input = Some(annotation.note.clone());
+                    }
+                }
                 KeyCode::Enter => {
                     if let Some(annotation) = app.annotations.get(app.annotation_selected) {
                         if let Some(reader) = &mut app.reader {
@@ -1025,6 +1084,7 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
             KeyCode::Char('b') => app.add_bookmark()?,
             KeyCode::Char('B') => app.load_bookmarks()?,
             KeyCode::Char('M') => app.load_annotations()?,
+            KeyCode::Char('E') => { app.export_mode = true; app.input = Some(String::new()); },
             KeyCode::Char('m') => { app.annotation_mode = true; app.input = Some(String::new()); },
             KeyCode::Char('/') => app.input = Some(String::new()),
             KeyCode::Char('n') => if let Some(r) = &mut app.reader {
@@ -1033,7 +1093,7 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
             KeyCode::Char('N') => if let Some(r) = &mut app.reader {
                 if let Some(prev) = r.chapters.iter().rev().find(|c| c.line < r.top) { r.top = prev.line; r.wrap_offset = 0; }
             },
-            KeyCode::Char('?') => app.status = "j/k 滚动  Space/PageDown 下一页  PageUp 上一页  t 目录  n/N 章节  b 添加书签  B 书签列表  m 添加笔记  M 笔记列表  / 搜索  q 返回".into(),
+            KeyCode::Char('?') => app.status = "j/k 滚动  Space/PageDown 下一页  PageUp 上一页  t 目录  n/N 章节  b 添加书签  B 书签列表  m 添加笔记  M 笔记列表  E 导出笔记  / 搜索  q 返回".into(),
             _ => {}
         }
     }
