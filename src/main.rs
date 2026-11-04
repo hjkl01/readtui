@@ -58,6 +58,14 @@ struct Bookmark {
 }
 
 #[derive(Clone)]
+struct SearchResult {
+    path: PathBuf,
+    title: String,
+    line: usize,
+    snippet: String,
+}
+
+#[derive(Clone)]
 struct Annotation {
     id: i64,
     line: usize,
@@ -148,6 +156,10 @@ struct App {
     annotation_mode: bool,
     tag_mode: bool,
     metadata_mode: bool,
+    library_search_mode: bool,
+    show_search_results: bool,
+    search_results: Vec<SearchResult>,
+    search_selected: usize,
     statistics: Option<String>,
     input: Option<String>,
     status: String,
@@ -190,6 +202,10 @@ fn main() -> Result<()> {
         annotation_mode: false,
         tag_mode: false,
         metadata_mode: false,
+        library_search_mode: false,
+        show_search_results: false,
+        search_results: Vec::new(),
+        search_selected: 0,
         statistics: None,
         input: None,
         status: "按 Enter 阅读，a 添加文件，? 查看快捷键".into(),
@@ -582,6 +598,26 @@ impl App {
         }
         Ok(())
     }
+
+    fn search_library(&mut self, query: &str) -> Result<()> {
+        self.search_results.clear();
+        let books = self.books.clone();
+        for book in books {
+            if self.search_results.len() >= 200 { break; }
+            if book.path.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("epub")) {
+                continue;
+            }
+            let mut document = match Document::open(&book.path) { Ok(doc) => doc, Err(_) => continue };
+            if let Some(line) = document.search(query, 0, false)? {
+                let snippet = document.read_line(line)?;
+                self.search_results.push(SearchResult { path: book.path, title: book.title, line, snippet });
+            }
+        }
+        self.search_selected = 0;
+        self.show_search_results = true;
+        self.status = format!("跨书搜索：找到 {} 本匹配书籍", self.search_results.len());
+        Ok(())
+    }
 }
 
 fn setup_terminal() -> Result<Terminal<CrosstermBackend<io::Stdout>>> {
@@ -717,6 +753,21 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
             .style(Style::default().fg(Color::Yellow));
         frame.render_widget(footer, chunks[2]);
     }
+    if app.show_search_results {
+        let popup = centered_rect(85, 80, area);
+        frame.render_widget(Clear, popup);
+        let entries: Vec<ListItem> = app.search_results.iter().map(|result| {
+            let snippet = result.snippet.chars().take(55).collect::<String>();
+            ListItem::new(format!("{} · 第 {} 行 · {}", result.title, result.line + 1, snippet))
+        }).collect();
+        let list = List::new(entries)
+            .block(Block::default().title("跨书搜索 · Enter 打开并定位 · Esc 关闭").borders(Borders::ALL))
+            .highlight_style(Style::default().bg(Color::DarkGray).fg(Color::White).add_modifier(Modifier::BOLD))
+            .highlight_symbol("▶ ");
+        let mut state = ListState::default();
+        state.select(if app.search_results.is_empty() { None } else { Some(app.search_selected.min(app.search_results.len()-1)) });
+        frame.render_stateful_widget(list, popup, &mut state);
+    }
     if let Some(stats) = &app.statistics {
         let popup = centered_rect(60, 35, area);
         frame.render_widget(Clear, popup);
@@ -725,7 +776,7 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
     if let Some(input) = &app.input {
         let popup = centered_rect(60, 20, area);
         frame.render_widget(Clear, popup);
-        let title = if app.annotation_mode { "为当前段落添加笔记" } else if app.tag_mode { "输入标签名称" } else if app.metadata_mode { "编辑书名|作者（作者可留空）" } else if app.screen == Screen::Reader { "搜索当前书籍" } else { "输入文件路径" };
+        let title = if app.library_search_mode { "跨书搜索关键词" } else if app.annotation_mode { "为当前段落添加笔记" } else if app.tag_mode { "输入标签名称" } else if app.metadata_mode { "编辑书名|作者（作者可留空）" } else if app.screen == Screen::Reader { "搜索当前书籍" } else { "输入文件路径" };
         frame.render_widget(Paragraph::new(input.as_str()).block(Block::default().title(title).borders(Borders::ALL)), popup);
     }
 }
@@ -749,7 +800,10 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
             KeyCode::Esc => app.input = None,
             KeyCode::Enter => {
                 let value = input.clone(); app.input = None;
-                if app.annotation_mode {
+                if app.library_search_mode {
+                    app.library_search_mode = false;
+                    app.search_library(&value)?;
+                } else if app.annotation_mode {
                     app.annotation_mode = false;
                     if !value.trim().is_empty() { app.add_annotation(value.trim())?; }
                 } else if app.tag_mode {
@@ -784,6 +838,7 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
             KeyCode::Up | KeyCode::Char('k') => { app.selected = app.selected.saturating_sub(1); },
             KeyCode::Enter => { if let Some(book) = app.books.get(app.selected) { app.open_book(book.path.clone())?; } },
             KeyCode::Char('a') => app.input = Some(String::new()),
+            KeyCode::Char('/') => { app.library_search_mode = true; app.input = Some(String::new()); },
             KeyCode::Char('f') => app.toggle_favorite()?,
             KeyCode::Char('s') => app.cycle_book_status()?,
             KeyCode::Char('t') => { app.tag_mode = true; app.input = Some(String::new()); },
@@ -791,11 +846,29 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
             KeyCode::Char('x') => app.clear_selected_tags()?,
             KeyCode::Char('o') => app.books.sort_by(|a,b| b.favorite.cmp(&a.favorite).then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))),
             KeyCode::Char('S') => app.show_statistics()?,
-            KeyCode::Char('?') => app.status = "↑/k 上移  ↓/j 下移  Enter 阅读  a 添加路径  f 收藏  s 状态  t 标签  e 编辑元数据  x 清空标签  o 收藏优先  S 统计  q 退出".into(),
+            KeyCode::Char('?') => app.status = "↑/k 上移  ↓/j 下移  Enter 阅读  a 添加路径  / 跨书搜索  f 收藏  s 状态  t 标签  e 编辑元数据  x 清空标签  o 收藏优先  S 统计  q 退出".into(),
             _ => {}
         }
         app.list_state.select(if app.books.is_empty() { None } else { Some(app.selected) });
     } else {
+        if app.show_search_results {
+            match key.code {
+                KeyCode::Esc => app.show_search_results = false,
+                KeyCode::Down | KeyCode::Char('j') => {
+                    if !app.search_results.is_empty() { app.search_selected = (app.search_selected + 1).min(app.search_results.len()-1); }
+                }
+                KeyCode::Up | KeyCode::Char('k') => app.search_selected = app.search_selected.saturating_sub(1),
+                KeyCode::Enter => {
+                    if let Some(result) = app.search_results.get(app.search_selected).cloned() {
+                        app.open_book(result.path)?;
+                        if let Some(reader) = &mut app.reader { reader.jump_to_line(result.line); }
+                    }
+                    app.show_search_results = false;
+                }
+                _ => {}
+            }
+            return Ok(());
+        }
         if app.show_annotations {
             match key.code {
                 KeyCode::Esc | KeyCode::Char('M') => app.show_annotations = false,
