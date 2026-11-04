@@ -124,6 +124,15 @@ cargo run -- ./path/to/novel.txt
 
 See [`docs/`](docs/) for architecture, database, format, and roadmap documents.
 
+## Releases
+
+Push a version tag such as `v0.1.0` to trigger the release workflow. GitHub Actions builds native release binaries for Linux x86_64, Windows x86_64, and macOS, then attaches them to a GitHub Release.
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
 ## License
 
 MIT
