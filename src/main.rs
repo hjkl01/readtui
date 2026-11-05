@@ -149,6 +149,8 @@ struct App {
     books: Vec<Book>,
     visible_books: Vec<usize>,
     library_filter: usize,
+    tag_filter: Option<String>,
+    tag_filter_mode: bool,
     selected: usize,
     list_state: ListState,
     reader: Option<Reader>,
@@ -229,6 +231,8 @@ fn main() -> Result<()> {
         visible_books: (0..books.len()).collect(),
         books,
         library_filter: 0,
+        tag_filter: None,
+        tag_filter_mode: false,
         selected: 0,
         list_state: ListState::default(),
         reader: None,
@@ -438,7 +442,8 @@ impl App {
                 4 => book.status == "finished",
                 _ => true,
             };
-            if visible { Some(index) } else { None }
+            let tag_matches = self.tag_filter.as_ref().is_none_or(|tag| book.tags.iter().any(|value| value.eq_ignore_ascii_case(tag)));
+            if visible && tag_matches { Some(index) } else { None }
         }).collect();
         self.selected = self.selected.min(self.visible_books.len().saturating_sub(1));
         self.list_state.select(if self.visible_books.is_empty() { None } else { Some(self.selected) });
@@ -946,7 +951,8 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
             ListItem::new(format!("{}{} [{}] {}  {}   {}", if book.favorite { "★ " } else { "" }, book.title, match book.status.as_str() { "reading" => "阅读中", "finished" => "已读完", _ => "未读" }, if book.author.is_empty() { String::new() } else { format!("· {} ", book.author) }, book.tags.join(","), path.display())).style(Style::default().fg(if book.tags.is_empty() { Color::White } else { Color::Cyan }))
         }).collect();
         let filter_label = match app.library_filter { 1 => "收藏", 2 => "阅读中", 3 => "未读", 4 => "已读完", _ => "全部" };
-        let list = List::new(items).block(Block::default().title(format!("书库 · {} 本 / {filter_label}", app.visible_books.len())).borders(Borders::ALL))
+        let tag_label = app.tag_filter.as_deref().map(|tag| format!(" / 标签:{tag}")).unwrap_or_default();
+        let list = List::new(items).block(Block::default().title(format!("书库 · {} 本 / {filter_label}{tag_label}", app.visible_books.len())).borders(Borders::ALL))
             .highlight_style(Style::default().bg(if app.theme_light { Color::Gray } else { Color::DarkGray }).fg(if app.theme_light { Color::Black } else { Color::White }).add_modifier(Modifier::BOLD))
             .highlight_symbol("▶ ");
         frame.render_stateful_widget(list, chunks[1], &mut app.list_state);
@@ -1060,7 +1066,7 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
     if let Some(input) = &app.input {
         let popup = centered_rect(60, 20, area);
         frame.render_widget(Clear, popup);
-        let title = if app.directory_import_mode { "输入要导入的目录路径" } else if app.export_mode { "导出笔记/书签的 Markdown 文件路径" } else if app.annotation_edit_mode { "编辑笔记内容" } else if app.goal_mode { "每日阅读目标（分钟）" } else if app.library_search_mode { "跨书搜索关键词" } else if app.annotation_mode { "为当前段落添加笔记" } else if app.tag_mode { "输入标签名称" } else if app.metadata_mode { "编辑书名|作者（作者可留空）" } else if app.screen == Screen::Reader { "搜索当前书籍" } else { "输入文件路径" };
+        let title = if app.directory_import_mode { "输入要导入的目录路径" } else if app.export_mode { "导出笔记/书签的 Markdown 文件路径" } else if app.annotation_edit_mode { "编辑笔记内容" } else if app.goal_mode { "每日阅读目标（分钟）" } else if app.library_search_mode { "跨书搜索关键词" } else if app.annotation_mode { "为当前段落添加笔记" } else if app.tag_filter_mode { "按标签筛选（留空清除）" } else if app.tag_mode { "输入标签名称" } else if app.metadata_mode { "编辑书名|作者（作者可留空）" } else if app.screen == Screen::Reader { "搜索当前书籍" } else { "输入文件路径" };
         frame.render_widget(Paragraph::new(input.as_str()).block(Block::default().title(title).borders(Borders::ALL)), popup);
     }
 }
@@ -1102,6 +1108,7 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 app.tag_mode = false;
                 app.metadata_mode = false;
                 app.goal_mode = false;
+                app.tag_filter_mode = false;
                 app.library_search_mode = false;
             },
             KeyCode::Enter => {
@@ -1124,6 +1131,11 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 } else if app.annotation_mode {
                     app.annotation_mode = false;
                     if !value.trim().is_empty() { app.add_annotation(value.trim())?; }
+                } else if app.tag_filter_mode {
+                    app.tag_filter_mode = false;
+                    app.tag_filter = if value.trim().is_empty() { None } else { Some(value.trim().to_string()) };
+                    app.refresh_visible_books();
+                    app.status = "已更新标签筛选（输入空值清除）".into();
                 } else if app.tag_mode {
                     app.tag_mode = false;
                     app.add_tag_to_selected(&value)?;
@@ -1188,10 +1200,11 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 app.refresh_visible_books();
                 app.status = "筛选：全部 / 收藏 / 阅读中 / 未读 / 已读完".into();
             },
+            KeyCode::Char('T') => { app.tag_filter_mode = true; app.input = Some(String::new()); },
             KeyCode::Char('S') => app.show_statistics()?,
             KeyCode::Char('G') => { app.goal_mode = true; app.input = Some(String::new()); },
             KeyCode::Char('c') => app.toggle_theme()?,
-            KeyCode::Char('?') => app.status = "↑/k 上移  ↓/j 下移  Enter 阅读  a 打开文件  A 导入目录  r 重扫书库  / 跨书搜索  F 筛选  f 收藏  s 状态  t 标签  e 编辑元数据  x 清空标签  o 收藏优先  G 每日目标  c 主题  S 统计  q 退出".into(),
+            KeyCode::Char('?') => app.status = "↑/k 上移  ↓/j 下移  Enter 阅读  a 打开文件  A 导入目录  r 重扫书库  / 跨书搜索  F 状态筛选  T 标签筛选  f 收藏  s 状态  t 标签  e 编辑元数据  x 清空标签  o 收藏优先  G 每日目标  c 主题  S 统计  q 退出".into(),
             _ => {}
         }
         app.list_state.select(if app.visible_books.is_empty() { None } else { Some(app.selected) });
