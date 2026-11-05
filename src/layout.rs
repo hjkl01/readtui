@@ -98,6 +98,35 @@ mod tests {
     }
 }
 
+/// Map a character offset within a source line to its wrapped visual row.
+pub fn wrap_offset_for_char_offset(line: &str, width: usize, char_offset: usize) -> usize {
+    let rows = wrap_line(line, width);
+    let mut consumed = 0usize;
+    for (index, row) in rows.iter().enumerate() {
+        let next = consumed + row.chars().count();
+        if char_offset < next {
+            return index;
+        }
+        if char_offset == next {
+            return (index + 1).min(rows.len().saturating_sub(1));
+        }
+        consumed = next;
+    }
+    rows.len().saturating_sub(1)
+}
+
+#[cfg(test)]
+mod position_tests {
+    use super::*;
+
+    #[test]
+    fn restores_character_position_after_width_changes() {
+        assert_eq!(wrap_offset_for_char_offset("中文小说阅读", 4, 4), 1);
+        assert_eq!(wrap_offset_for_char_offset("中文小说阅读", 2, 4), 2);
+        assert_eq!(wrap_offset_for_char_offset("abcde", 3, 4), 1);
+    }
+}
+
 /// Advance a cursor expressed as (source line, wrapped row within that line).
 pub fn advance(lines: &[String], line: &mut usize, offset: &mut usize, width: usize, rows: usize) {
     if lines.is_empty() { *line = 0; *offset = 0; return; }
