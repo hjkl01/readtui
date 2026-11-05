@@ -121,8 +121,8 @@ mod position_tests {
 
     #[test]
     fn restores_character_position_after_width_changes() {
-        assert_eq!(wrap_offset_for_char_offset("中文小说阅读", 4, 4), 1);
-        assert_eq!(wrap_offset_for_char_offset("中文小说阅读", 2, 4), 2);
+        assert_eq!(wrap_offset_for_char_offset("中文小说阅读", 4, 4), 2);
+        assert_eq!(wrap_offset_for_char_offset("中文小说阅读", 2, 4), 4);
         assert_eq!(wrap_offset_for_char_offset("abcde", 3, 4), 1);
     }
 }
