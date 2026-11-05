@@ -146,10 +146,10 @@ impl Document {
 
     pub fn detect_chapters_with_patterns(&mut self, custom_patterns: &[String]) -> Result<Vec<Chapter>> {
         let defaults = [
-            r"^\\s*第[零〇一二三四五六七八九十百千万两0-9０-９]+[章节回卷集部篇].*",
-            r"^\\s*(序章|楔子|引子|序言|后记|尾声|终章)\\s*$",
-            r"^\\s*Chapter\\s+[0-9IVXivx]+.*",
-            r"^\\s*卷[一二三四五六七八九十0-9]+.*",
+            r"^\s*第[零〇一二三四五六七八九十百千万两0-9０-９]+[章节回卷集部篇].*",
+            r"^\s*(序章|楔子|引子|序言|后记|尾声|终章)\s*$",
+            r"^\s*Chapter\s+[0-9IVXivx]+.*",
+            r"^\s*卷[一二三四五六七八九十0-9]+.*",
         ];
         let mut regexes: Vec<Regex> = defaults.iter().map(|pattern| Regex::new(pattern).unwrap()).collect();
         for pattern in custom_patterns.iter().filter(|pattern| !pattern.trim().is_empty()) {
