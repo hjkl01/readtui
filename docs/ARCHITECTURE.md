@@ -43,7 +43,7 @@ Tables:
 - reading_sessions: session start/end and duration.
 - book_metadata: title, author, favorite flag, and reading status.
 - tags / book_tags: user-defined labels.
-- settings: theme, daily reading goal, and reader margins.
+- settings: theme, daily reading goal, reader margins, and custom chapter-detection regex patterns.
 
 Original source files are not copied into SQLite.
 
@@ -54,7 +54,7 @@ Original source files are not copied into SQLite.
 - Markdown conversion is text-oriented, not a complete CommonMark renderer.
 - FB2 extraction supports common text blocks; images, binary attachments, and metadata editing are not exposed.
 - UTF-16 LE/BE is auto-detected when a BOM is present; BOM-less UTF-16 and user-selectable encodings are not yet implemented.
-- Current-book and chapter-scoped search are sequential line scans. Cross-library search returns the first match per book; there is no persistent full-text index.
+- Chapter detection combines built-in Chinese/English patterns with optional user-supplied regular expressions. Current-book and chapter-scoped search are sequential line scans. Cross-library search returns the first match per book; there is no persistent full-text index.
 - PDF, MOBI, and AZW3 are not supported.
 - Notes are attached to the current source line; arbitrary text selection is not yet implemented (existing notes can be edited).
 - Daily, rolling-week, monthly, total statistics, daily goals, and consecutive reading-day streaks are implemented; charts and statistics export are not yet implemented.
