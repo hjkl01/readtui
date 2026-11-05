@@ -34,7 +34,7 @@
 - [x] Annotation editing and Markdown export
 - [ ] Chapter-only search
 - [ ] Configurable chapter detection rules
-- [ ] Exact character-column restoration within a source line after reflow
+- [x] Exact character-column restoration within a source line after reflow
 
 ## Phase 4 — Formats
 
