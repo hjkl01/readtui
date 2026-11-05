@@ -1,6 +1,8 @@
 use anyhow::{Context, Result};
 use regex::Regex;
 use roxmltree::Document;
+use scraper::{Html, Selector};
+use mobi::{headers::Encryption, Mobi};
 use std::{collections::hash_map::DefaultHasher, fs, hash::{Hash, Hasher}, path::{Path, PathBuf}};
 
 fn cache_path(source: &Path, cache_dir: &Path, kind: &str) -> Result<PathBuf> {
@@ -13,16 +15,54 @@ fn cache_path(source: &Path, cache_dir: &Path, kind: &str) -> Result<PathBuf> {
     Ok(cache_dir.join(format!("{:016x}.{kind}.txt", hasher.finish())))
 }
 
-fn html_to_text(source: &str) -> String {
-    let scripts = Regex::new(r"(?is)<script[^>]*>.*?</script>|<style[^>]*>.*?</style>").unwrap();
-    let blocks = Regex::new(r"(?i)<\s*/?\s*(br|p|div|h[1-6]|li|blockquote|tr|section|article|hr)[^>]*>").unwrap();
-    let tags = Regex::new(r"(?s)<[^>]+>").unwrap();
+pub(crate) fn html_to_text(source: &str) -> String {
+    // EPUB/MOBI markup is often HTML-like rather than well-formed XML.
+    // HTML5 parsing tolerates unquoted attributes and legacy markup.
+    let scripts = Regex::new(r"(?is)<script\\b[^>]*>.*?</script\\s*>|<style\\b[^>]*>.*?</style\\s*>").unwrap();
     let clean = scripts.replace_all(source, "");
-    let clean = blocks.replace_all(&clean, "\n");
-    let clean = tags.replace_all(&clean, "");
-    clean.replace("&nbsp;", " ").replace("&amp;", "&").replace("&lt;", "<")
-        .replace("&gt;", ">").replace("&quot;", "\"").lines()
-        .map(str::trim).filter(|line| !line.is_empty()).collect::<Vec<_>>().join("\n")
+    let document = Html::parse_document(&clean);
+    let blocks = Selector::parse("p, h1, h2, h3, h4, h5, h6, li, blockquote, pre, td, th").unwrap();
+    let mut lines = document.select(&blocks).filter_map(|element| {
+        let text = element.text().collect::<String>();
+        let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        (!text.is_empty()).then_some(text)
+    }).collect::<Vec<_>>();
+
+    if lines.is_empty() {
+        let body = Selector::parse("body").unwrap();
+        if let Some(element) = document.select(&body).next() {
+            let text = element.text().collect::<String>();
+            let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+            if !text.is_empty() { lines.push(text); }
+        }
+    }
+    lines.join("\\n")
+}
+
+pub fn mobi_metadata(source: &Path) -> Result<(Option<String>, Option<String>)> {
+    let book = Mobi::from_path(source).context("MOBI 文件头或元数据解析失败")?;
+    if book.encryption() != Encryption::No {
+        anyhow::bail!("该 MOBI 文件受 DRM 加密，readtui 不支持解密");
+    }
+    let title = book.title().trim().to_string();
+    let author = book.author().map(|value| value.trim().to_string()).filter(|value| !value.is_empty());
+    Ok(((!title.is_empty()).then_some(title), author))
+}
+
+fn mobi_to_cache(source: &Path, cache_dir: &Path) -> Result<PathBuf> {
+    let target = cache_path(source, cache_dir, "mobi")?;
+    if target.exists() { return Ok(target); }
+    let book = Mobi::from_path(source).context("MOBI 文件头或元数据解析失败")?;
+    if book.encryption() != Encryption::No {
+        anyhow::bail!("该 MOBI 文件受 DRM 加密，readtui 不支持解密");
+    }
+    let markup = book.content_as_string().context("MOBI 正文解压或字符解码失败")?;
+    let text = html_to_text(&markup);
+    if text.trim().is_empty() {
+        anyhow::bail!("MOBI 文件中没有可读取的正文内容");
+    }
+    fs::write(&target, text)?;
+    Ok(target)
 }
 
 fn markdown_to_text(source: &str) -> String {
@@ -63,12 +103,12 @@ fn fb2_to_text(source: &str) -> Result<String> {
 pub fn to_cache(source: &Path, cache_dir: &Path) -> Result<PathBuf> {
     let ext = source.extension().and_then(|value| value.to_str()).unwrap_or("").to_ascii_lowercase();
     let kind = match ext.as_str() {
-        "md" | "markdown" => "markdown", "html" | "htm" => "html", "fb2" => "fb2",
+        "md" | "markdown" => "markdown", "html" | "htm" => "html", "fb2" => "fb2", "mobi" => "mobi",
         _ => return Ok(source.to_path_buf()),
     };
     let target = cache_path(source, cache_dir, kind)?;
     if target.exists() { return Ok(target); }
-    let raw = fs::read_to_string(source).with_context(|| format!("无法读取 {} 文本", ext.to_uppercase()))?;
+    if kind == "mobi" { return mobi_to_cache(source, cache_dir); }\n    let raw = fs::read_to_string(source).with_context(|| format!("无法读取 {} 文本", ext.to_uppercase()))?;
     let text = match kind {
         "markdown" => markdown_to_text(&raw), "html" => html_to_text(&raw), "fb2" => fb2_to_text(&raw)?,
         _ => raw,
