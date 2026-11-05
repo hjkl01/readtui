@@ -106,21 +106,73 @@ pub fn extract_to_cache(path: &Path, cache_dir: &Path) -> Result<PathBuf> {
         if let (Some(id), Some(href), Some(media)) =
             (item.attribute("id"), item.attribute("href"), item.attribute("media-type"))
         {
-            manifest.insert(id.to_string(), (href.to_string(), media.to_string()));
+            let properties = item.attribute("properties").unwrap_or("").to_string();
+            manifest.insert(id.to_string(), (href.to_string(), media.to_string(), properties));
+        }
+    }
+
+    // EPUB 3 navigation documents use <nav epub:type="toc">; EPUB 2 uses NCX.
+    // Normalize archive-relative hrefs so navigation labels can be matched to spine items.
+    let mut navigation = HashMap::<String, String>::new();
+    for (href, media, properties) in manifest.values() {
+        if properties.split_whitespace().any(|value| value == "nav") {
+            let member = normalized_member(&opf_path, href);
+            if let Ok(source) = entry_text(&mut archive, &member) {
+                if let Ok(nav) = Document::parse(&source) {
+                    for node in nav.descendants().filter(|node| node.is_element() && node.tag_name().name() == "nav") {
+                        let is_toc = node.attributes().any(|attribute| attribute.value().contains("toc"));
+                        if !is_toc { continue; }
+                        for link in node.descendants().filter(|child| child.is_element() && child.tag_name().name() == "a") {
+                            if let Some(target) = link.attribute("href") {
+                                let title = node_text(link);
+                                if !title.is_empty() {
+                                    navigation.insert(normalized_member(&member, target), title);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if media == "application/x-dtbncx+xml" || href.to_ascii_lowercase().ends_with(".ncx") {
+            let spine_toc = package.descendants().find(|node| node.has_tag_name("spine"))
+                .and_then(|node| node.attribute("toc"));
+            if spine_toc.is_some() {
+                let member = normalized_member(&opf_path, href);
+                if let Ok(source) = entry_text(&mut archive, &member) {
+                    if let Ok(ncx) = Document::parse(&source) {
+                        for point in ncx.descendants().filter(|node| node.is_element() && node.tag_name().name() == "navPoint") {
+                            let target = point.descendants().find(|node| node.is_element() && node.tag_name().name() == "content")
+                                .and_then(|node| node.attribute("src"));
+                            let title = point.descendants().find(|node| node.is_element() && node.tag_name().name() == "navLabel")
+                                .map(node_text).unwrap_or_default();
+                            if let (Some(target), false) = (target, title.is_empty()) {
+                                navigation.insert(normalized_member(&member, target), title);
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
     let mut chapters = Vec::new();
     for itemref in package.descendants().filter(|node| node.has_tag_name("itemref")) {
         let Some(idref) = itemref.attribute("idref") else { continue; };
-        let Some((href, media)) = manifest.get(idref) else { continue; };
+        let Some((href, media, _)) = manifest.get(idref) else { continue; };
         if !media.contains("html") && !href.ends_with(".xhtml") && !href.ends_with(".html") { continue; }
         let member = normalized_member(&opf_path, href);
         let source = entry_text(&mut archive, &member)
             .with_context(|| format!("无法读取 EPUB 章节：{member}"))?;
         let chapter = xhtml_to_text(&source)?;
         if !chapter.trim().is_empty() {
-            chapters.push(chapter.trim().to_string());
+            let mut content = chapter.trim().to_string();
+            if let Some(title) = navigation.get(&member) {
+                if content.lines().next().map(str::trim) != Some(title.as_str()) {
+                    content = format!("{title}\\n{content}");
+                }
+            }
+            chapters.push(content);
         }
     }
     if chapters.is_empty() { return Err(anyhow!("EPUB 中没有找到可读取的正文章节")); }
