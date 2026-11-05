@@ -1162,9 +1162,9 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
     if app.screen == Screen::Library {
         match key.code {
             KeyCode::Char('q') => app.should_quit = true,
-            KeyCode::Down | KeyCode::Char('j') => { if !app.books.is_empty() { app.selected = (app.selected + 1).min(app.books.len()-1); } },
+            KeyCode::Down | KeyCode::Char('j') => { if !app.visible_books.is_empty() { app.selected = (app.selected + 1).min(app.visible_books.len()-1); } },
             KeyCode::Up | KeyCode::Char('k') => { app.selected = app.selected.saturating_sub(1); },
-            KeyCode::Enter => { if let Some(book) = app.books.get(app.selected) { app.open_book(book.path.clone())?; } },
+            KeyCode::Enter => { if let Some(index) = app.selected_book_index() { app.open_book(app.books[index].path.clone())?; } },
             KeyCode::Char('a') => app.input = Some(String::new()),
             KeyCode::Char('A') => { app.directory_import_mode = true; app.input = Some(String::new()); },
             KeyCode::Char('r') => app.rescan_library()?,
@@ -1176,13 +1176,18 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
             KeyCode::Char('x') => app.clear_selected_tags()?,
             KeyCode::Char('o') => app.books.sort_by(|a,b| b.favorite.cmp(&a.favorite).then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))),
             KeyCode::Char('R') => app.sort_by_recent()?,
+            KeyCode::Char('F') => {
+                app.library_filter = (app.library_filter + 1) % 5;
+                app.refresh_visible_books();
+                app.status = "筛选：全部 / 收藏 / 阅读中 / 未读 / 已读完".into();
+            },
             KeyCode::Char('S') => app.show_statistics()?,
             KeyCode::Char('G') => { app.goal_mode = true; app.input = Some(String::new()); },
             KeyCode::Char('c') => app.toggle_theme()?,
-            KeyCode::Char('?') => app.status = "↑/k 上移  ↓/j 下移  Enter 阅读  a 打开文件  A 导入目录  r 重扫书库  / 跨书搜索  f 收藏  s 状态  t 标签  e 编辑元数据  x 清空标签  o 收藏优先  G 每日目标  c 主题  S 统计  q 退出".into(),
+            KeyCode::Char('?') => app.status = "↑/k 上移  ↓/j 下移  Enter 阅读  a 打开文件  A 导入目录  r 重扫书库  / 跨书搜索  F 筛选  f 收藏  s 状态  t 标签  e 编辑元数据  x 清空标签  o 收藏优先  G 每日目标  c 主题  S 统计  q 退出".into(),
             _ => {}
         }
-        app.list_state.select(if app.books.is_empty() { None } else { Some(app.selected) });
+        app.list_state.select(if app.visible_books.is_empty() { None } else { Some(app.selected) });
     } else {
         if app.show_annotations {
             match key.code {
