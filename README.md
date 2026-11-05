@@ -8,7 +8,7 @@ readtui is designed for distraction-free reading in Windows Terminal, WezTerm, K
 
 The first development milestone provides a working foundation:
 
-- Browse local `.txt`, `.md`, `.markdown`, `.epub`, `.html`, `.htm`, and `.fb2` books recursively.
+- Browse local `.txt`, `.md`, `.markdown`, `.epub`, `.html`, `.htm`, `.fb2`, and `.mobi` books recursively.
 - Read large plain-text files through a byte-offset line index instead of loading the entire book into a `Vec<String>`.
 - Convert EPUB spine chapters (including NCX/nav chapter labels), Markdown, HTML, and FB2 into a cached plain-text reading stream.
 - Import EPUB title and creator metadata as defaults when opening a book.
@@ -133,7 +133,7 @@ Reader:
 - Database: `$XDG_CONFIG_HOME/readtui/readtui.db` on Linux, or the platform configuration directory returned by `dirs`.
 - Extracted format cache: the platform cache directory under `readtui/formats`.
 
-Original book files are never copied into the database. SQLite stores reading positions, bookmarks, notes, metadata, tags, settings, and session records. EPUB/Markdown/HTML/FB2 extraction is cached separately; cache files can be regenerated from the originals.
+Original book files are never copied into the database. SQLite stores reading positions, bookmarks, notes, metadata, tags, settings, and session records. EPUB/MOBI/Markdown/HTML/FB2 extraction is cached separately; cache files can be regenerated from the originals.
 
 ## Development
 
