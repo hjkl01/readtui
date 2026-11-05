@@ -227,8 +227,14 @@ fn main() -> Result<()> {
             let sidecar = PathBuf::from(format!("{}{}", database_path.display(), suffix));
             if sidecar.exists() { fs::remove_file(sidecar)?; }
         }
-        fs::rename(&temporary, &database_path)
-            .with_context(|| "无法替换数据库；请先关闭其他 readtui 实例")?;
+        let previous = database_path.with_extension("pre-restore");
+        if previous.exists() { fs::remove_file(&previous)?; }
+        if database_path.exists() { fs::rename(&database_path, &previous)?; }
+        if let Err(error) = fs::rename(&temporary, &database_path) {
+            if previous.exists() { let _ = fs::rename(&previous, &database_path); }
+            return Err(error).with_context(|| "无法替换数据库；请先关闭其他 readtui 实例");
+        }
+        if previous.exists() { fs::remove_file(previous)?; }
         println!("数据库已从 {} 恢复", source.display());
         return Ok(());
     }
