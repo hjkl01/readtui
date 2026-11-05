@@ -4,21 +4,19 @@ use regex::Regex;
 use std::{
     fs::File,
     io::{BufRead, BufReader, Read, Seek, SeekFrom},
-    path::{Path, PathBuf},
+    path::Path,
 };
 
 #[derive(Debug, Clone)]
 pub struct Chapter {
     pub title: String,
     pub line: usize,
-    pub byte_offset: u64,
 }
 
 #[derive(Clone, Copy, PartialEq)]
 enum TextEncoding { Utf8OrLegacy, Utf16Le, Utf16Be }
 
 pub struct Document {
-    pub path: PathBuf,
     file: File,
     encoding: TextEncoding,
     pub line_offsets: Vec<u64>,
@@ -27,7 +25,7 @@ pub struct Document {
 
 impl Document {
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
-        let path = path.as_ref().to_path_buf();
+        let path = path.as_ref();
         let file = File::open(&path).with_context(|| format!("无法打开文件：{}", path.display()))?;
         let byte_len = file.metadata()?.len();
         let mut probe = [0u8; 2];
@@ -73,7 +71,7 @@ impl Document {
             }
         }
 
-        Ok(Self { path, file, encoding, line_offsets: offsets, byte_len })
+        Ok(Self { file, encoding, line_offsets: offsets, byte_len })
     }
 
     pub fn line_count(&self) -> usize {
@@ -89,11 +87,6 @@ impl Document {
             Ok(line) => line,
             Err(next) => next.saturating_sub(1).min(self.line_offsets.len().saturating_sub(1)),
         }
-    }
-
-    pub fn seek_offset(&mut self, offset: u64) -> Result<()> {
-        self.file.seek(SeekFrom::Start(offset.min(self.byte_len)))?;
-        Ok(())
     }
 
     pub fn read_line(&mut self, line: usize) -> Result<String> {
@@ -140,6 +133,7 @@ impl Document {
         }
     }
 
+    #[cfg(test)]
     pub fn detect_chapters(&mut self) -> Result<Vec<Chapter>> {
         self.detect_chapters_with_patterns(&[])
     }
@@ -159,11 +153,11 @@ impl Document {
         for line in 0..self.line_count() {
             let title = self.read_line(line)?.trim().to_string();
             if !title.is_empty() && regexes.iter().any(|regex| regex.is_match(&title)) {
-                chapters.push(Chapter { title, line, byte_offset: self.offset_for_line(line) });
+                chapters.push(Chapter { title, line });
             }
         }
         if chapters.is_empty() && self.line_count() > 0 {
-            chapters.push(Chapter { title: "正文".into(), line: 0, byte_offset: 0 });
+            chapters.push(Chapter { title: "正文".into(), line: 0 });
         }
         Ok(chapters)
     }
