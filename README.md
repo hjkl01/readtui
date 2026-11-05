@@ -59,11 +59,15 @@ Choose a different library directory:
 readtui --library ./novels
 ```
 
-Open a file directly:
+Open a file directly (explicit option or positional argument):
 
 ```bash
+readtui --file ./novels/三体.txt
+readtui -f ./novels/三体.txt
 readtui ./novels/三体.txt
 ```
+
+The `--file` / `-f` option opens the specified book immediately and skips the library selection screen. The positional form remains supported for compatibility.
 
 Database maintenance:
 
