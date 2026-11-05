@@ -5,7 +5,7 @@
 The reader keeps the original book path as its identity. Text formats are converted to cache files only when extraction or markup cleanup is required:
 
 - TXT: read directly from the original file.
-- EPUB: read the OPF manifest and spine, extract XHTML paragraphs in spine order, then cache the extracted text.
+- EPUB: read the OPF manifest and spine, extract XHTML paragraphs in spine order, use EPUB 2 NCX / EPUB 3 nav labels as chapter headings where available, and cache the extracted text. The OPF title and creator are imported as defaults when no user metadata exists.
 - Markdown: remove common heading, emphasis, link, quote, and fenced-code markup while retaining readable text.
 - HTML: remove scripts/styles and tags, preserve common block boundaries, and decode common named entities.
 - FB2: parse XML and extract title, paragraph, verse, and author blocks.
@@ -48,11 +48,11 @@ Original source files are not copied into SQLite.
 
 ## Current limitations
 
-- EPUB navigation documents (NCX/nav), metadata, images, footnotes, and complex layout are not yet exposed in the UI.
+- EPUB NCX/nav labels and OPF title/creator are consumed, but a hierarchical navigation panel, landmarks, cover images, inline images, footnotes, and complex layout are not exposed in the UI.
 - HTML conversion is intentionally lightweight and is not a full browser DOM renderer.
 - Markdown conversion is text-oriented, not a complete CommonMark renderer.
 - FB2 extraction supports common text blocks; images, binary attachments, and metadata editing are not exposed.
 - Legacy Chinese decoding is line-oriented. UTF-16 and user-selectable encodings are not yet implemented.
 - Cross-library search returns the first match per book and is a sequential scan, not a persistent full-text index.
 - Notes are attached to the current source line; selecting arbitrary text and editing existing annotations are future work.
-- Daily statistics and goal tracking are implemented; weekly/monthly charts, streaks, and export are not yet implemented.
+- Daily, rolling-week, monthly, total statistics, daily goals, and consecutive reading-day streaks are implemented; charts and statistics export are not yet implemented.
