@@ -23,7 +23,7 @@ pub(crate) fn html_to_text(source: &str) -> String {
     let document = Html::parse_document(&clean);
     let blocks = Selector::parse("p, h1, h2, h3, h4, h5, h6, li, blockquote, pre, td, th").unwrap();
     let mut lines = document.select(&blocks).filter_map(|element| {
-        let text = element.text().collect::<String>();
+        let text = element.text().collect::<Vec<_>>().join("");
         let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
         (!text.is_empty()).then_some(text)
     }).collect::<Vec<_>>();
