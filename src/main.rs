@@ -28,6 +28,7 @@ use std::{
     time::Duration,
 };
 use walkdir::WalkDir;
+use unicode_width::UnicodeWidthStr;
 use document::{Chapter, Document};
 
 #[derive(Parser, Debug)]
@@ -1223,6 +1224,11 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
                 } else {
                     Style::default().fg(if app.theme_light { Color::Black } else { Color::White })
                 };
+                let mut row = row;
+                if current {
+                    let padding = content_width.saturating_sub(row.width());
+                    row.push_str(&" ".repeat(padding));
+                }
                 let number = if row_index == 0 {
                     format!("{:>width$} ", index + 1, width = number_width)
                 } else {
@@ -1236,7 +1242,7 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
         }
         if gutter_width > 0 {
             frame.render_widget(
-                Paragraph::new(Text::from(gutter_lines)).style(Style::default().bg(if app.theme_light { Color::Reset } else { Color::Reset })),
+                Paragraph::new(Text::from(gutter_lines)),
                 columns[0],
             );
         }
