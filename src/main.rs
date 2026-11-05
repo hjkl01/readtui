@@ -223,8 +223,8 @@ fn main() -> Result<()> {
         theme_light,
         input: None,
         status: "按 Enter 阅读，a 添加文件，? 查看快捷键".into(),
-        viewport_width: 80,
-        viewport_height: 20,
+        viewport_width: 0,
+        viewport_height: 0,
     };
 
     app.list_state.select(if app.books.is_empty() { None } else { Some(0) });
@@ -514,8 +514,10 @@ impl App {
     fn save_progress(&mut self) -> Result<()> {
         if let Some(reader) = &mut self.reader {
             let offset = reader.document.offset_for_line(reader.top);
-            let text = reader.document.read_line(reader.top)?;
-            reader.char_offset = char_offset_for_wrap_offset(&text, self.viewport_width, reader.wrap_offset);
+            if self.viewport_width > 0 {
+                let text = reader.document.read_line(reader.top)?;
+                reader.char_offset = char_offset_for_wrap_offset(&text, self.viewport_width, reader.wrap_offset);
+            }
             self.db.execute(
                 "INSERT INTO reading_progress(path,line,byte_offset,wrap_offset,char_offset,updated_at)
                  VALUES (?1,?2,?3,?4,?5,CURRENT_TIMESTAMP)
