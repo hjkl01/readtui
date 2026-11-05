@@ -141,6 +141,8 @@ enum Screen {
 struct App {
     screen: Screen,
     books: Vec<Book>,
+    visible_books: Vec<usize>,
+    library_filter: usize,
     selected: usize,
     list_state: ListState,
     reader: Option<Reader>,
@@ -193,7 +195,9 @@ fn main() -> Result<()> {
     let theme_light = load_setting(&db, "theme").unwrap_or_else(|_| "dark".into()) == "light";
     let mut app = App {
         screen: Screen::Library,
+        visible_books: (0..books.len()).collect(),
         books,
+        library_filter: 0,
         selected: 0,
         list_state: ListState::default(),
         reader: None,
@@ -390,6 +394,25 @@ fn load_book_metadata(db: &Connection, books: &mut [Book]) -> Result<()> {
 }
 
 impl App {
+    fn selected_book_index(&self) -> Option<usize> {
+        self.visible_books.get(self.selected).copied()
+    }
+
+    fn refresh_visible_books(&mut self) {
+        self.visible_books = self.books.iter().enumerate().filter_map(|(index, book)| {
+            let visible = match self.library_filter {
+                1 => book.favorite,
+                2 => book.status == "reading",
+                3 => book.status == "unread",
+                4 => book.status == "finished",
+                _ => true,
+            };
+            if visible { Some(index) } else { None }
+        }).collect();
+        self.selected = self.selected.min(self.visible_books.len().saturating_sub(1));
+        self.list_state.select(if self.visible_books.is_empty() { None } else { Some(self.selected) });
+    }
+
     fn import_directory(&mut self, root: &Path) -> Result<usize> {
         if !root.is_dir() { self.status = "目录不存在".into(); return Ok(0); }
         let mut imported = 0usize;
