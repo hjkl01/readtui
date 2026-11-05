@@ -643,7 +643,7 @@ impl App {
             return Ok(());
         }
         let ext = path.extension().and_then(|value| value.to_str()).unwrap_or("").to_ascii_lowercase();
-        if !matches!(ext.as_str(), "txt" | "md" | "markdown" | "epub" | "html" | "htm" | "fb2") {
+        if !matches!(ext.as_str(), "txt" | "md" | "markdown" | "epub" | "html" | "htm" | "fb2" | "mobi") {
             self.status = format!("暂不支持该文件格式：.{ext}");
             return Ok(());
         }
