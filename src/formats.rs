@@ -31,7 +31,7 @@ pub(crate) fn html_to_text(source: &str) -> String {
     if lines.is_empty() {
         let body = Selector::parse("body").unwrap();
         if let Some(element) = document.select(&body).next() {
-            let text = element.text().collect::<String>();
+            let text = element.text().collect::<Vec<_>>().join("");
             let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
             if !text.is_empty() { lines.push(text); }
         }
