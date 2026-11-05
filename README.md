@@ -117,6 +117,7 @@ Reader:
 | `n` / `N` | Next / previous detected chapter |
 | `t` | Open the table of contents |
 | `/` | Search the current book |
+| `C` | Search within the current chapter |
 | `b` / `B` | Add bookmark / browse bookmarks |
 | `m` / `M` | Add paragraph note / browse notes |
 | `e` / `d` in notes | Edit / delete selected note |
