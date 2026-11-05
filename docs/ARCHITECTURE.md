@@ -5,7 +5,7 @@
 The reader keeps the original book path as its identity. Text formats are converted to cache files only when extraction or markup cleanup is required:
 
 - TXT: read directly from the original file.
-- EPUB: read the OPF manifest and spine, extract XHTML paragraphs in spine order, use EPUB 2 NCX / EPUB 3 nav labels as chapter headings where available, and cache the extracted text. The OPF title and creator are imported as defaults when no user metadata exists.
+- EPUB: read the OPF manifest and spine, extract XHTML paragraphs in spine order, use EPUB 2 NCX / EPUB 3 nav labels as chapter headings where available, and cache the extracted text. XHTML is parsed with an HTML5 parser to tolerate common real-world malformed markup and unquoted attributes. The OPF title and creator are imported as defaults when no user metadata exists.\n- MOBI: parse Palm database records and MOBI/EXTH metadata, decompress unencrypted PalmDOC or HUFF text records, parse embedded HTML with the HTML5 parser, and cache the resulting text. DRM-protected files are rejected. KF8/AZW3 skeleton/fragment reconstruction is not supported.
 - Markdown: remove common heading, emphasis, link, quote, and fenced-code markup while retaining readable text.
 - HTML: remove scripts/styles and tags, preserve common block boundaries, and decode common named entities.
 - FB2: parse XML and extract title, paragraph, verse, and author blocks.
@@ -55,7 +55,7 @@ Original source files are not copied into SQLite.
 - FB2 extraction supports common text blocks; images, binary attachments, and metadata editing are not exposed.
 - UTF-16 LE/BE is auto-detected when a BOM is present; BOM-less UTF-16 and user-selectable encodings are not yet implemented.
 - Chapter detection combines built-in Chinese/English patterns with optional user-supplied regular expressions. Current-book and chapter-scoped search are sequential line scans. Cross-library search returns the first match per book; there is no persistent full-text index.
-- PDF, MOBI, and AZW3 are not supported.
+- MOBI7 text extraction supports unencrypted PalmDOC/HUFF content. KF8/AZW3 reconstruction, PDF, and DRM-protected books are not supported.
 - Notes are attached to the current source line; arbitrary text selection is not yet implemented (existing notes can be edited).
 - Daily, rolling-week, monthly, total statistics, daily goals, and consecutive reading-day streaks are implemented; charts and statistics export are not yet implemented.
 
