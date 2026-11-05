@@ -200,6 +200,10 @@ fn main() -> Result<()> {
     let home = dirs::home_dir().context("无法确定用户主目录")?;
     let library_dir = args.library.unwrap_or_else(|| home.join("Books"));
     fs::create_dir_all(&library_dir)?;
+    if args.duplicates {
+        print_duplicate_books(&library_dir)?;
+        return Ok(());
+    }
 
     let data_dir = dirs::config_dir()
         .unwrap_or_else(|| home.join(".config"))
@@ -230,6 +234,18 @@ fn main() -> Result<()> {
         db.execute("VACUUM INTO ?1", [target.to_string_lossy().as_ref()])
             .with_context(|| format!("备份数据库失败：{}", target.display()))?;
         println!("数据库已备份到 {}", target.display());
+        return Ok(());
+    }
+
+    if args.prune_missing {
+        let removed = prune_missing_books(&db)?;
+        println!("已清理 {removed} 条丢失书籍记录。");
+        return Ok(());
+    }
+    if let Some(mapping) = args.relink {
+        let (old, new) = mapping.split_once('=')
+            .ok_or_else(|| anyhow::anyhow!("--relink 格式应为：旧路径=新路径"))?;
+        relink_book_path(&db, Path::new(old), Path::new(new))?;
         return Ok(());
     }
 
