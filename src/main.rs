@@ -54,6 +54,7 @@ struct Bookmark {
     line: usize,
     byte_offset: u64,
     wrap_offset: usize,
+    char_offset: usize,
     note: String,
 }
 
@@ -80,6 +81,7 @@ struct Reader {
     chapters: Vec<Chapter>,
     top: usize,
     wrap_offset: usize,
+    char_offset: usize,
     session_id: i64,
 }
 
@@ -306,6 +308,7 @@ fn init_db(db: &Connection) -> Result<()> {
     for (column, definition) in [
         ("byte_offset", "INTEGER NOT NULL DEFAULT 0"),
         ("wrap_offset", "INTEGER NOT NULL DEFAULT 0"),
+        ("char_offset", "INTEGER NOT NULL DEFAULT 0"),
     ] {
         add_column_if_missing(db, "reading_progress", column, definition)?;
         add_column_if_missing(db, "bookmarks", column, definition)?;
@@ -463,12 +466,12 @@ impl App {
         let document_path = reader_source_path(&path)?;
         let mut document = Document::open(&document_path)?;
         let chapters = document.detect_chapters()?;
-        let saved: Option<(i64, i64, i64)> = self.db.query_row(
-            "SELECT line, byte_offset, wrap_offset FROM reading_progress WHERE path=?1",
+        let saved: Option<(i64, i64, i64, i64)> = self.db.query_row(
+            "SELECT line, byte_offset, wrap_offset, char_offset FROM reading_progress WHERE path=?1",
             [path.to_string_lossy().as_ref()],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         ).optional()?;
-        let (line, byte_offset, wrap_offset) = saved.unwrap_or((0, 0, 0));
+        let (line, byte_offset, wrap_offset, char_offset) = saved.unwrap_or((0, 0, 0, 0));
         let top = if byte_offset > 0 {
             document.line_for_offset(byte_offset as u64)
         } else {
@@ -501,25 +504,28 @@ impl App {
         }
         self.db.execute("INSERT INTO reading_sessions(path) VALUES (?1)", [path.to_string_lossy().as_ref()])?;
         let session_id = self.db.last_insert_rowid();
-        self.reader = Some(Reader { book, document, chapters, top, wrap_offset: wrap_offset.max(0) as usize, session_id });
+        self.reader = Some(Reader { book, document, chapters, top, wrap_offset: wrap_offset.max(0) as usize, char_offset: char_offset.max(0) as usize, session_id });
         self.screen = Screen::Reader;
         self.show_toc = false;
         self.show_bookmarks = false;
         Ok(())
     }
 
-    fn save_progress(&self) -> Result<()> {
-        if let Some(reader) = &self.reader {
+    fn save_progress(&mut self) -> Result<()> {
+        if let Some(reader) = &mut self.reader {
             let offset = reader.document.offset_for_line(reader.top);
+            let text = reader.document.read_line(reader.top)?;
+            reader.char_offset = char_offset_for_wrap_offset(&text, self.viewport_width, reader.wrap_offset);
             self.db.execute(
-                "INSERT INTO reading_progress(path,line,byte_offset,wrap_offset,updated_at)
-                 VALUES (?1,?2,?3,?4,CURRENT_TIMESTAMP)
+                "INSERT INTO reading_progress(path,line,byte_offset,wrap_offset,char_offset,updated_at)
+                 VALUES (?1,?2,?3,?4,?5,CURRENT_TIMESTAMP)
                  ON CONFLICT(path) DO UPDATE SET
                    line=excluded.line, byte_offset=excluded.byte_offset,
-                   wrap_offset=excluded.wrap_offset, updated_at=CURRENT_TIMESTAMP",
+                   wrap_offset=excluded.wrap_offset, char_offset=excluded.char_offset,
+                   updated_at=CURRENT_TIMESTAMP",
                 params![
                     reader.book.path.to_string_lossy().as_ref(),
-                    reader.top as i64, offset as i64, reader.wrap_offset as i64
+                    reader.top as i64, offset as i64, reader.wrap_offset as i64, reader.char_offset as i64
                 ],
             )?;
         }
@@ -530,8 +536,11 @@ impl App {
         if let Some(reader) = &self.reader {
             let offset = reader.document.offset_for_line(reader.top);
             self.db.execute(
-                "INSERT INTO bookmarks(path,line,byte_offset,wrap_offset) VALUES (?1,?2,?3,?4)",
-                params![reader.book.path.to_string_lossy().as_ref(), reader.top as i64, offset as i64, reader.wrap_offset as i64],
+                "INSERT INTO bookmarks(path,line,byte_offset,wrap_offset,char_offset) VALUES (?1,?2,?3,?4,?5)",
+                params![
+                    reader.book.path.to_string_lossy().as_ref(), reader.top as i64, offset as i64,
+                    reader.wrap_offset as i64, reader.char_offset as i64
+                ],
             )?;
             self.status = "已添加书签".into();
         }
@@ -542,7 +551,7 @@ impl App {
         self.bookmarks.clear();
         if let Some(reader) = &self.reader {
             let mut statement = self.db.prepare(
-                "SELECT id,line,byte_offset,wrap_offset,note FROM bookmarks WHERE path=?1 ORDER BY created_at DESC,id DESC"
+                "SELECT id,line,byte_offset,wrap_offset,char_offset,note FROM bookmarks WHERE path=?1 ORDER BY created_at DESC,id DESC"
             )?;
             let rows = statement.query_map([reader.book.path.to_string_lossy().as_ref()], |row| {
                 Ok(Bookmark {
@@ -550,7 +559,8 @@ impl App {
                     line: row.get::<_, i64>(1)?.max(0) as usize,
                     byte_offset: row.get::<_, i64>(2)?.max(0) as u64,
                     wrap_offset: row.get::<_, i64>(3)?.max(0) as usize,
-                    note: row.get(4)?,
+                    char_offset: row.get::<_, i64>(4)?.max(0) as usize,
+                    note: row.get(5)?,
                 })
             })?;
             for row in rows { self.bookmarks.push(row?); }
@@ -884,7 +894,11 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
         let line_count = reader.line_count();
         if let Ok(current_line) = reader.document.read_line(reader.top) {
             let wrapped_rows = layout::wrap_line(&current_line, text_width).len();
-            reader.wrap_offset = reader.wrap_offset.min(wrapped_rows.saturating_sub(1));
+            if reader.char_offset > 0 {
+                reader.wrap_offset = wrap_offset_for_char_offset(&current_line, text_width, reader.char_offset);
+            } else {
+                reader.wrap_offset = reader.wrap_offset.min(wrapped_rows.saturating_sub(1));
+            }
         }
         let mut visible = Vec::with_capacity(height);
         for index in reader.top..line_count {
@@ -983,6 +997,20 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
         let title = if app.directory_import_mode { "输入要导入的目录路径" } else if app.export_mode { "导出笔记/书签的 Markdown 文件路径" } else if app.annotation_edit_mode { "编辑笔记内容" } else if app.goal_mode { "每日阅读目标（分钟）" } else if app.library_search_mode { "跨书搜索关键词" } else if app.annotation_mode { "为当前段落添加笔记" } else if app.tag_mode { "输入标签名称" } else if app.metadata_mode { "编辑书名|作者（作者可留空）" } else if app.screen == Screen::Reader { "搜索当前书籍" } else { "输入文件路径" };
         frame.render_widget(Paragraph::new(input.as_str()).block(Block::default().title(title).borders(Borders::ALL)), popup);
     }
+}
+
+
+fn char_offset_for_wrap_offset(text: &str, width: usize, wrap_offset: usize) -> usize {
+    layout::wrap_line(text, width).iter().take(wrap_offset).map(|row| row.chars().count()).sum()
+}
+
+fn wrap_offset_for_char_offset(text: &str, width: usize, char_offset: usize) -> usize {
+    let mut consumed = 0usize;
+    for (index, row) in layout::wrap_line(text, width).iter().enumerate() {
+        if consumed >= char_offset { return index; }
+        consumed += row.chars().count();
+    }
+    layout::wrap_line(text, width).len().saturating_sub(1)
 }
 
 fn centered_rect(width: u16, height: u16, area: ratatui::layout::Rect) -> ratatui::layout::Rect {
@@ -1134,6 +1162,7 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
                         if let Some(reader) = &mut app.reader {
                             reader.jump_to_line(if bookmark.byte_offset > 0 { reader.document.line_for_offset(bookmark.byte_offset) } else { bookmark.line });
                             reader.wrap_offset = bookmark.wrap_offset;
+                            reader.char_offset = bookmark.char_offset;
                         }
                     }
                     app.show_bookmarks = false;
