@@ -36,6 +36,12 @@ struct Args {
     /// 指定书库目录（默认 ~/Books）
     #[arg(short, long)]
     library: Option<PathBuf>,
+    /// 将数据库备份到指定文件并退出
+    #[arg(long, conflicts_with = "restore")]
+    backup: Option<PathBuf>,
+    /// 从数据库备份恢复并退出
+    #[arg(long, conflicts_with = "backup")]
+    restore: Option<PathBuf>,
 }
 
 #[derive(Clone)]
@@ -184,8 +190,33 @@ fn main() -> Result<()> {
         .unwrap_or_else(|| home.join(".config"))
         .join("readtui");
     fs::create_dir_all(&data_dir)?;
-    let db = Connection::open(data_dir.join("readtui.db"))?;
+    let database_path = data_dir.join("readtui.db");
+    if let Some(source) = args.restore {
+        if !source.is_file() { anyhow::bail!("备份文件不存在：{}", source.display()); }
+        let backup = Connection::open(&source)
+            .with_context(|| format!("无法打开备份文件：{}", source.display()))?;
+        let integrity: String = backup.query_row("PRAGMA integrity_check", [], |row| row.get(0))?;
+        if integrity != "ok" { anyhow::bail!("备份数据库完整性检查失败：{integrity}"); }
+        drop(backup);
+        let temporary = database_path.with_extension("restore.tmp");
+        fs::copy(&source, &temporary)?;
+        fs::rename(&temporary, &database_path)
+            .with_context(|| "无法替换数据库；请先关闭其他 readtui 实例")?;
+        println!("数据库已从 {} 恢复", source.display());
+        return Ok(());
+    }
+    let db = Connection::open(&database_path)?;
     init_db(&db)?;
+    if let Some(target) = args.backup {
+        if target.exists() { anyhow::bail!("备份目标已存在：{}", target.display()); }
+        if let Some(parent) = target.parent() {
+            if !parent.as_os_str().is_empty() { fs::create_dir_all(parent)?; }
+        }
+        db.execute("VACUUM INTO ?1", [target.to_string_lossy().as_ref()])
+            .with_context(|| format!("备份数据库失败：{}", target.display()))?;
+        println!("数据库已备份到 {}", target.display());
+        return Ok(());
+    }
 
     let mut books = scan_books(&library_dir);
     load_registered_books(&db, &mut books)?;
