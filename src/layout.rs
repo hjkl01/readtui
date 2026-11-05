@@ -99,6 +99,7 @@ mod tests {
 }
 
 /// Map a character offset within a source line to its wrapped visual row.
+#[cfg(test)]
 pub fn wrap_offset_for_char_offset(line: &str, width: usize, char_offset: usize) -> usize {
     let rows = wrap_line(line, width);
     let mut consumed = 0usize;
@@ -128,6 +129,7 @@ mod position_tests {
 }
 
 /// Advance a cursor expressed as (source line, wrapped row within that line).
+#[cfg(test)]
 pub fn advance(lines: &[String], line: &mut usize, offset: &mut usize, width: usize, rows: usize) {
     if lines.is_empty() { *line = 0; *offset = 0; return; }
     let mut remaining = rows.max(1);
@@ -149,6 +151,7 @@ pub fn advance(lines: &[String], line: &mut usize, offset: &mut usize, width: us
 }
 
 /// Retreat a cursor expressed as (source line, wrapped row within that line).
+#[cfg(test)]
 pub fn retreat(lines: &[String], line: &mut usize, offset: &mut usize, width: usize, rows: usize) {
     if lines.is_empty() { *line = 0; *offset = 0; return; }
     let mut remaining = rows.max(1);
