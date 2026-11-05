@@ -14,7 +14,7 @@
 
 | Key | Action |
 |---|---|
-| `j` / `k`, arrows | Scroll |
+| `↑` / `↓` | Scroll half a screen |\n| `j` / `k` | Scroll one visual row |
 | `Space` / `PageDown` | Forward page |
 | `PageUp` | Backward page |
 | `g` / `G` | Start / end |
