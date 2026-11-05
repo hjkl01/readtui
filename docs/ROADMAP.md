@@ -37,7 +37,7 @@
 - [x] Current-book and cross-library literal search
 - [x] Annotation editing and Markdown export
 - [x] Chapter-only search
-- [ ] Configurable chapter detection rules
+- [x] Configurable chapter detection rules
 - [x] Exact character-column restoration within a source line after reflow
 
 ## Phase 4 — Formats
