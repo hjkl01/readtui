@@ -54,7 +54,7 @@ fn is_block(name: &str) -> bool {
 }
 
 fn node_text(node: Node<'_, '_>) -> String {
-    node.descendants().filter_map(|child| child.text())
+    node.descendants().filter(|child| child.is_text()).filter_map(|child| child.text())
         .collect::<Vec<_>>().join("")
         .split_whitespace().collect::<Vec<_>>().join(" ")
 }
