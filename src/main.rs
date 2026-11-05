@@ -188,6 +188,7 @@ struct App {
     vertical_margin: u16,
     library_search_mode: bool,
     chapter_search_mode: bool,
+    chapter_rules_mode: bool,
     show_search_results: bool,
     search_results: Vec<SearchResult>,
     search_selected: usize,
@@ -302,6 +303,7 @@ fn main() -> Result<()> {
         vertical_margin,
         library_search_mode: false,
         chapter_search_mode: false,
+        chapter_rules_mode: false,
         show_search_results: false,
         search_results: Vec::new(),
         search_selected: 0,
@@ -659,7 +661,9 @@ impl App {
     fn open_book(&mut self, path: PathBuf) -> Result<()> {
         let document_path = reader_source_path(&path)?;
         let mut document = Document::open(&document_path)?;
-        let chapters = document.detect_chapters()?;
+        let custom_patterns = load_setting(&self.db, "chapter_patterns")?;
+        let custom_patterns: Vec<String> = custom_patterns.split(';').map(str::trim).filter(|pattern| !pattern.is_empty()).map(str::to_string).collect();
+        let chapters = document.detect_chapters_with_patterns(&custom_patterns)?;
         let saved: Option<(i64, i64, i64, i64)> = self.db.query_row(
             "SELECT line, byte_offset, wrap_offset, char_offset FROM reading_progress WHERE path=?1",
             [path.to_string_lossy().as_ref()],
@@ -928,6 +932,29 @@ impl App {
         let theme = if self.theme_light { "light" } else { "dark" };
         self.db.execute("INSERT INTO settings(key,value) VALUES ('theme',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [theme])?;
         self.status = format!("已切换{}主题", if self.theme_light { "浅色" } else { "深色" });
+        Ok(())
+    }
+
+    fn set_chapter_patterns(&mut self, value: &str) -> Result<()> {
+        let patterns: Vec<String> = value.split(';').map(str::trim).filter(|pattern| !pattern.is_empty()).map(str::to_string).collect();
+        for pattern in &patterns {
+            regex::Regex::new(pattern).with_context(|| format!("章节规则正则表达式无效：{pattern}"))?;
+        }
+        let stored = patterns.join(";");
+        self.db.execute(
+            "INSERT INTO settings(key,value) VALUES ('chapter_patterns',?1)
+             ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            [&stored],
+        )?;
+        if let Some(reader) = &mut self.reader {
+            reader.chapters = reader.document.detect_chapters_with_patterns(&patterns)?;
+            self.toc_selected = reader.chapters.iter().rposition(|chapter| chapter.line <= reader.top).unwrap_or(0);
+        }
+        self.status = if patterns.is_empty() {
+            "已恢复默认章节识别规则".into()
+        } else {
+            format!("已保存 {} 条自定义章节规则", patterns.len())
+        };
         Ok(())
     }
 
@@ -1249,7 +1276,7 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
     if let Some(input) = &app.input {
         let popup = centered_rect(60, 20, area);
         frame.render_widget(Clear, popup);
-        let title = if app.directory_import_mode { "输入要导入的目录路径" } else if app.export_mode { "导出笔记/书签的 Markdown 文件路径" } else if app.annotation_edit_mode { "编辑笔记内容" } else if app.goal_mode { "每日阅读目标（分钟）" } else if app.typography_mode { "阅读边距：横向,纵向（例如 3,1）" } else if app.library_search_mode { "跨书搜索关键词" } else if app.chapter_search_mode { "搜索当前章节" } else if app.annotation_mode { "为当前段落添加笔记" } else if app.tag_filter_mode { "按标签筛选（留空清除）" } else if app.tag_mode { "输入标签名称" } else if app.metadata_mode { "编辑书名|作者（作者可留空）" } else if app.screen == Screen::Reader { "搜索当前书籍" } else { "输入文件路径" };
+        let title = if app.directory_import_mode { "输入要导入的目录路径" } else if app.export_mode { "导出笔记/书签的 Markdown 文件路径" } else if app.annotation_edit_mode { "编辑笔记内容" } else if app.goal_mode { "每日阅读目标（分钟）" } else if app.typography_mode { "阅读边距：横向,纵向（例如 3,1）" } else if app.library_search_mode { "跨书搜索关键词" } else if app.chapter_search_mode { "搜索当前章节" } else if app.chapter_rules_mode { "自定义章节正则（多条规则用 ; 分隔，留空恢复默认）" } else if app.annotation_mode { "为当前段落添加笔记" } else if app.tag_filter_mode { "按标签筛选（留空清除）" } else if app.tag_mode { "输入标签名称" } else if app.metadata_mode { "编辑书名|作者（作者可留空）" } else if app.screen == Screen::Reader { "搜索当前书籍" } else { "输入文件路径" };
         frame.render_widget(Paragraph::new(input.as_str()).block(Block::default().title(title).borders(Borders::ALL)), popup);
     }
 }
@@ -1295,6 +1322,7 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 app.tag_filter_mode = false;
                 app.library_search_mode = false;
                 app.chapter_search_mode = false;
+                app.chapter_rules_mode = false;
             },
             KeyCode::Enter => {
                 let value = input.clone(); app.input = None;
@@ -1319,6 +1347,9 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 } else if app.chapter_search_mode {
                     app.chapter_search_mode = false;
                     app.search_current_chapter(&value)?;
+                } else if app.chapter_rules_mode {
+                    app.chapter_rules_mode = false;
+                    app.set_chapter_patterns(&value)?;
                 } else if app.annotation_mode {
                     app.annotation_mode = false;
                     if !value.trim().is_empty() { app.add_annotation(value.trim())?; }
@@ -1506,13 +1537,14 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
             KeyCode::Char('m') => { app.annotation_mode = true; app.input = Some(String::new()); },
             KeyCode::Char('/') => app.input = Some(String::new()),
             KeyCode::Char('C') => { app.chapter_search_mode = true; app.input = Some(String::new()); },
+            KeyCode::Char('K') => { app.chapter_rules_mode = true; app.input = Some(load_setting(&app.db, "chapter_patterns")?); },
             KeyCode::Char('n') => if let Some(r) = &mut app.reader {
                 if let Some(next) = r.chapters.iter().find(|c| c.line > r.top) { r.top = next.line; r.wrap_offset = 0; }
             },
             KeyCode::Char('N') => if let Some(r) = &mut app.reader {
                 if let Some(prev) = r.chapters.iter().rev().find(|c| c.line < r.top) { r.top = prev.line; r.wrap_offset = 0; }
             },
-            KeyCode::Char('?') => app.status = "j/k 滚动  Space/PageDown 下一页  PageUp 上一页  t 目录  n/N 章节  b 添加书签  B 书签列表  m 添加笔记  M 笔记列表  E 导出笔记  / 搜索  C 本章搜索  q 返回".into(),
+            KeyCode::Char('?') => app.status = "j/k 滚动  Space/PageDown 下一页  PageUp 上一页  t 目录  n/N 章节  b 添加书签  B 书签列表  m 添加笔记  M 笔记列表  E 导出笔记  / 搜索  C 本章搜索  K 章节规则  q 返回".into(),
             _ => {}
         }
     }
