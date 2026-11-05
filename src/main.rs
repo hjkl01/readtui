@@ -938,7 +938,10 @@ impl App {
     fn set_chapter_patterns(&mut self, value: &str) -> Result<()> {
         let patterns: Vec<String> = value.split(';').map(str::trim).filter(|pattern| !pattern.is_empty()).map(str::to_string).collect();
         for pattern in &patterns {
-            regex::Regex::new(pattern).with_context(|| format!("章节规则正则表达式无效：{pattern}"))?;
+            if let Err(error) = regex::Regex::new(pattern) {
+                self.status = format!("章节规则无效：{pattern}（{error}）");
+                return Ok(());
+            }
         }
         let stored = patterns.join(";");
         self.db.execute(
