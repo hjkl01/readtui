@@ -56,7 +56,10 @@ fn mobi_to_cache(source: &Path, cache_dir: &Path) -> Result<PathBuf> {
     if book.encryption() != Encryption::No {
         anyhow::bail!("该 MOBI 文件受 DRM 加密，readtui 不支持解密");
     }
-    let markup = book.content_as_string().context("MOBI 正文解压或字符解码失败")?;
+    // Some MOBI files declare UTF-8 while containing malformed byte sequences.
+    // Keep strict decoding as the fast path, then fall back to the crate's lossy
+    // decoder so a single invalid byte does not make the entire book unreadable.
+    let markup = book.content_as_string().unwrap_or_else(|_| book.content_as_string_lossy());
     let text = html_to_text(&markup);
     if text.trim().is_empty() {
         anyhow::bail!("MOBI 文件中没有可读取的正文内容");
