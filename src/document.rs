@@ -59,7 +59,7 @@ impl Document {
             reader.seek(SeekFrom::Start(2))?;
             let mut position = 2u64;
             let mut pair = [0u8; 2];
-            let mut line_start = 2u64;
+            if byte_len > 2 { offsets.push(2); }
             while position + 1 < byte_len {
                 if reader.read_exact(&mut pair).is_err() { break; }
                 position += 2;
@@ -68,13 +68,8 @@ impl Document {
                     TextEncoding::Utf16Be => pair == [0x00, 0x0a],
                     TextEncoding::Utf8OrLegacy => false,
                 };
-                if newline && position < byte_len {
-                    offsets.push(position);
-                    line_start = position;
-                }
+                if newline && position < byte_len { offsets.push(position); }
             }
-            if line_start < byte_len && offsets.is_empty() { offsets.push(2); }
-            else if line_start < byte_len && offsets.last().copied() != Some(line_start) { offsets.push(line_start); }
         }
 
         Ok(Self { path, file, encoding, line_offsets: offsets, byte_len })
