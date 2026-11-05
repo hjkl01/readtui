@@ -3,7 +3,7 @@ use encoding_rs::{BIG5, GB18030};
 use regex::Regex;
 use std::{
     fs::File,
-    io::{BufRead, BufReader, Seek, SeekFrom},
+    io::{BufRead, BufReader, Read, Seek, SeekFrom},
     path::{Path, PathBuf},
 };
 
@@ -14,9 +14,13 @@ pub struct Chapter {
     pub byte_offset: u64,
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum TextEncoding { Utf8OrLegacy, Utf16Le, Utf16Be }
+
 pub struct Document {
     pub path: PathBuf,
     file: File,
+    encoding: TextEncoding,
     pub line_offsets: Vec<u64>,
     pub byte_len: u64,
 }
@@ -26,26 +30,54 @@ impl Document {
         let path = path.as_ref().to_path_buf();
         let file = File::open(&path).with_context(|| format!("无法打开文件：{}", path.display()))?;
         let byte_len = file.metadata()?.len();
-        let mut offsets = vec![0u64];
-        let mut reader = BufReader::new(file.try_clone()?);
-        let mut buffer = Vec::with_capacity(8192);
-        let mut position = 0u64;
-
-        loop {
-            buffer.clear();
-            let read = reader.read_until(b'\n', &mut buffer)?;
-            if read == 0 { break; }
-            position += read as u64;
-            if position < byte_len {
-                offsets.push(position);
+        let mut probe = [0u8; 2];
+        let mut probe_file = file.try_clone()?;
+        let probe_len = probe_file.read(&mut probe)?;
+        let encoding = if probe_len == 2 && probe == [0xff, 0xfe] {
+            TextEncoding::Utf16Le
+        } else if probe_len == 2 && probe == [0xfe, 0xff] {
+            TextEncoding::Utf16Be
+        } else {
+            TextEncoding::Utf8OrLegacy
+        };
+        let mut offsets = Vec::new();
+        if encoding == TextEncoding::Utf8OrLegacy {
+            offsets.push(0);
+            let mut reader = BufReader::new(file.try_clone()?);
+            let mut buffer = Vec::with_capacity(8192);
+            let mut position = 0u64;
+            loop {
+                buffer.clear();
+                let read = reader.read_until(b'\n', &mut buffer)?;
+                if read == 0 { break; }
+                position += read as u64;
+                if position < byte_len { offsets.push(position); }
             }
+            if byte_len == 0 { offsets.clear(); }
+        } else {
+            let mut reader = BufReader::new(file.try_clone()?);
+            reader.seek(SeekFrom::Start(2))?;
+            let mut position = 2u64;
+            let mut pair = [0u8; 2];
+            let mut line_start = 2u64;
+            while position + 1 < byte_len {
+                if reader.read_exact(&mut pair).is_err() { break; }
+                position += 2;
+                let newline = match encoding {
+                    TextEncoding::Utf16Le => pair == [0x0a, 0x00],
+                    TextEncoding::Utf16Be => pair == [0x00, 0x0a],
+                    TextEncoding::Utf8OrLegacy => false,
+                };
+                if newline && position < byte_len {
+                    offsets.push(position);
+                    line_start = position;
+                }
+            }
+            if line_start < byte_len && offsets.is_empty() { offsets.push(2); }
+            else if line_start < byte_len && offsets.last().copied() != Some(line_start) { offsets.push(line_start); }
         }
 
-        if byte_len == 0 {
-            offsets.clear();
-        }
-
-        Ok(Self { path, file, line_offsets: offsets, byte_len })
+        Ok(Self { path, file, encoding, line_offsets: offsets, byte_len })
     }
 
     pub fn line_count(&self) -> usize {
@@ -75,10 +107,41 @@ impl Document {
         self.file.seek(SeekFrom::Start(offset))?;
         let mut reader = BufReader::new(&mut self.file);
         let mut bytes = Vec::with_capacity(1024);
-        reader.read_until(b'\n', &mut bytes)?;
-        if bytes.last() == Some(&b'\n') { bytes.pop(); }
-        if bytes.last() == Some(&b'\r') { bytes.pop(); }
-        Ok(decode_line(&bytes))
+        if self.encoding == TextEncoding::Utf8OrLegacy {
+            reader.read_until(b'\n', &mut bytes)?;
+            if bytes.last() == Some(&b'\n') { bytes.pop(); }
+            if bytes.last() == Some(&b'\r') { bytes.pop(); }
+            Ok(decode_line(&bytes))
+        } else {
+            let mut pair = [0u8; 2];
+            loop {
+                match reader.read_exact(&mut pair) {
+                    Ok(()) => {
+                        let newline = match self.encoding {
+                            TextEncoding::Utf16Le => pair == [0x0a, 0x00],
+                            TextEncoding::Utf16Be => pair == [0x00, 0x0a],
+                            TextEncoding::Utf8OrLegacy => false,
+                        };
+                        if newline { break; }
+                        bytes.extend_from_slice(&pair);
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => break,
+                    Err(error) => return Err(error.into()),
+                }
+            }
+            if bytes.len() >= 2 {
+                let last = &bytes[bytes.len()-2..];
+                if match self.encoding { TextEncoding::Utf16Le => last == [0x0d,0x00], TextEncoding::Utf16Be => last == [0x00,0x0d], _ => false } {
+                    bytes.truncate(bytes.len()-2);
+                }
+            }
+            let units = bytes.chunks_exact(2).map(|chunk| match self.encoding {
+                TextEncoding::Utf16Le => u16::from_le_bytes([chunk[0],chunk[1]]),
+                TextEncoding::Utf16Be => u16::from_be_bytes([chunk[0],chunk[1]]),
+                TextEncoding::Utf8OrLegacy => 0,
+            });
+            Ok(char::decode_utf16(units).map(|value| value.unwrap_or(char::REPLACEMENT_CHARACTER)).collect())
+        }
     }
 
     pub fn detect_chapters(&mut self) -> Result<Vec<Chapter>> {
@@ -90,13 +153,8 @@ impl Document {
         ];
         let regexes: Vec<Regex> = patterns.iter().filter_map(|p| Regex::new(p).ok()).collect();
         let mut chapters = Vec::new();
-        let mut reader = BufReader::new(self.file.try_clone()?);
-        reader.seek(SeekFrom::Start(0))?;
-        let mut buffer = Vec::with_capacity(4096);
         for line in 0..self.line_count() {
-            buffer.clear();
-            reader.read_until(b'\n', &mut buffer)?;
-            let title = decode_line(&buffer).trim().to_string();
+            let title = self.read_line(line)?.trim().to_string();
             if !title.is_empty() && regexes.iter().any(|regex| regex.is_match(&title)) {
                 chapters.push(Chapter { title, line, byte_offset: self.offset_for_line(line) });
             }
@@ -110,13 +168,8 @@ impl Document {
     pub fn search(&mut self, query: &str, from_line: usize, case_sensitive: bool) -> Result<Option<usize>> {
         if query.is_empty() || from_line >= self.line_count() { return Ok(None); }
         let needle = if case_sensitive { query.to_string() } else { query.to_lowercase() };
-        let mut reader = BufReader::new(self.file.try_clone()?);
-        reader.seek(SeekFrom::Start(self.offset_for_line(from_line)))?;
-        let mut buffer = Vec::with_capacity(4096);
         for line in from_line..self.line_count() {
-            buffer.clear();
-            if reader.read_until(b'\n', &mut buffer)? == 0 { break; }
-            let text = decode_line(&buffer);
+            let text = self.read_line(line)?;
             let found = if case_sensitive { text.contains(&needle) }
                 else { text.to_lowercase().contains(&needle) };
             if found { return Ok(Some(line)); }
