@@ -474,10 +474,31 @@ impl App {
         } else {
             (line.max(0) as usize).min(document.line_count().saturating_sub(1))
         };
-        let book = self.books.iter().find(|book| book.path == path).cloned().unwrap_or_else(|| {
+        let mut book = self.books.iter().find(|book| book.path == path).cloned().unwrap_or_else(|| {
             let title = path.file_stem().and_then(|s| s.to_str()).unwrap_or("未命名").to_string();
             Book { path: path.clone(), title, author: String::new(), favorite: false, status: "unread".into(), tags: Vec::new() }
         });
+        if path.extension().and_then(|value| value.to_str()).is_some_and(|value| value.eq_ignore_ascii_case("epub"))
+            && book.author.is_empty()
+        {
+            if let Ok((title, author)) = epub::read_metadata(&path) {
+                if let Some(title) = title {
+                    let filename_title = path.file_stem().and_then(|value| value.to_str()).unwrap_or("");
+                    if book.title == filename_title { book.title = title; }
+                }
+                if let Some(author) = author { book.author = author; }
+                if let Some(existing) = self.books.iter_mut().find(|existing| existing.path == path) {
+                    existing.title = book.title.clone();
+                    existing.author = book.author.clone();
+                }
+                self.db.execute(
+                    "INSERT INTO book_metadata(path,title,author,favorite,status)
+                     VALUES (?1,?2,?3,?4,?5)
+                     ON CONFLICT(path) DO UPDATE SET title=excluded.title,author=excluded.author,updated_at=CURRENT_TIMESTAMP",
+                    params![path.to_string_lossy().as_ref(), book.title, book.author, book.favorite as i64, book.status],
+                )?;
+            }
+        }
         self.db.execute("INSERT INTO reading_sessions(path) VALUES (?1)", [path.to_string_lossy().as_ref()])?;
         let session_id = self.db.last_insert_rowid();
         self.reader = Some(Reader { book, document, chapters, top, wrap_offset: wrap_offset.max(0) as usize, session_id });
