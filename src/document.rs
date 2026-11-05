@@ -44,6 +44,7 @@ impl Document {
         if encoding == TextEncoding::Utf8OrLegacy {
             offsets.push(0);
             let mut reader = BufReader::new(file.try_clone()?);
+            reader.seek(SeekFrom::Start(0))?;
             let mut buffer = Vec::with_capacity(8192);
             let mut position = 0u64;
             loop {
