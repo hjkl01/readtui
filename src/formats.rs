@@ -126,6 +126,12 @@ mod tests {
         assert!(text.contains("标题")); assert!(text.contains("加粗 链接")); assert!(!text.contains("https://"));
     }
     #[test]
+    fn html5_parser_accepts_unquoted_attributes_and_doctype() {
+        let text = html_to_text(r#"<!doctype html><html><head><meta http-equiv=Content-Type content=text/html></head><body><p>第一段</p><p>第二段</p></body></html>"#);
+        assert_eq!(text, "第一段\\n第二段");
+    }
+
+    #[test]
     fn html_paragraphs_are_extracted() {
         let text = html_to_text("<h1>标题</h1><p>正文 &amp; 内容</p><script>bad()</script>");
         assert!(text.contains("标题")); assert!(text.contains("正文 & 内容")); assert!(!text.contains("bad"));
