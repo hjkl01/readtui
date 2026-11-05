@@ -204,6 +204,28 @@ mod tests {
     }
 
     #[test]
+    fn utf16_bom_files_decode_both_byte_orders() {
+        let le = std::env::temp_dir().join(format!("readtui-utf16-le-{}.txt", std::process::id()));
+        let be = std::env::temp_dir().join(format!("readtui-utf16-be-{}.txt", std::process::id()));
+        let mut le_bytes = vec![255, 254];
+        for unit in "第一行\n第二行".encode_utf16() { le_bytes.extend_from_slice(&unit.to_le_bytes()); }
+        let mut be_bytes = vec![254, 255];
+        for unit in "第一行\n第二行".encode_utf16() { be_bytes.extend_from_slice(&unit.to_be_bytes()); }
+        std::fs::write(&le, le_bytes).unwrap();
+        std::fs::write(&be, be_bytes).unwrap();
+        let mut left = Document::open(&le).unwrap();
+        let mut right = Document::open(&be).unwrap();
+        assert_eq!(left.line_count(), 2);
+        assert_eq!(right.line_count(), 2);
+        assert_eq!(left.read_line(1).unwrap(), "第二行");
+        assert_eq!(right.read_line(1).unwrap(), "第二行");
+        drop(left);
+        drop(right);
+        std::fs::remove_file(le).unwrap();
+        std::fs::remove_file(be).unwrap();
+    }
+
+    #[test]
     fn handles_empty_files() {
         let path = std::env::temp_dir().join(format!("readtui-empty-{}.txt", std::process::id()));
         std::fs::write(&path, "").unwrap();
