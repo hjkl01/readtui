@@ -1040,7 +1040,7 @@ fn setup_terminal() -> Result<Terminal<CrosstermBackend<io::Stdout>>> {
     Terminal::new(CrosstermBackend::new(out)).map_err(Into::into)
 }
 
-fn restore_terminal<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> Result<()> {
+fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;
