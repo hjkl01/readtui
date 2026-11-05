@@ -1179,33 +1179,71 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
         let body = Layout::default().direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(100)]).split(chunks[1])[0].inner(Margin { vertical: app.vertical_margin, horizontal: app.horizontal_margin });
         let height = body.height.max(1) as usize;
-        let text_width = body.width.max(1) as usize;
-        app.viewport_width = text_width;
-        app.viewport_height = height;
         let line_count = reader.line_count();
+        let number_width = line_count.max(1).to_string().len().max(3);
+        let gutter_width = number_width.saturating_add(1).min(body.width.saturating_sub(1) as usize);
+        let content_width = body.width.saturating_sub(gutter_width as u16).max(1) as usize;
+        app.viewport_width = content_width;
+        app.viewport_height = height;
         if let Ok(current_line) = reader.document.read_line(reader.top) {
-            let wrapped_rows = layout::wrap_line(&current_line, text_width).len();
+            let wrapped_rows = layout::wrap_line(&current_line, content_width).len();
             if reader.char_offset > 0 {
-                reader.wrap_offset = wrap_offset_for_char_offset(&current_line, text_width, reader.char_offset);
+                reader.wrap_offset = wrap_offset_for_char_offset(&current_line, content_width, reader.char_offset);
             } else {
                 reader.wrap_offset = reader.wrap_offset.min(wrapped_rows.saturating_sub(1));
             }
         }
-        let mut visible = Vec::with_capacity(height);
+        let columns = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Length(gutter_width as u16), Constraint::Min(1)])
+            .split(body);
+        let mut gutter_lines = Vec::with_capacity(height);
+        let mut content_lines = Vec::with_capacity(height);
         for index in reader.top..line_count {
             let text = reader.document.read_line(index).unwrap_or_else(|_| "[读取失败]".into());
-            let wrapped = layout::wrap_line(&text, text_width);
-            let rows = if index == reader.top { wrapped.into_iter().skip(reader.wrap_offset).collect::<Vec<_>>() } else { wrapped };
-            for row in rows {
-                visible.push(Line::from(Span::raw(row)));
-                if visible.len() >= height { break; }
+            let wrapped = layout::wrap_line(&text, content_width);
+            let rows = if index == reader.top {
+                wrapped.into_iter().skip(reader.wrap_offset).collect::<Vec<_>>()
+            } else {
+                wrapped
+            };
+            for (row_index, row) in rows.into_iter().enumerate() {
+                let current = index == reader.top;
+                let gutter_style = if current {
+                    Style::default().fg(if app.theme_light { Color::Blue } else { Color::Cyan })
+                        .bg(if app.theme_light { Color::Gray } else { Color::DarkGray })
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::DarkGray)
+                };
+                let text_style = if current {
+                    Style::default()
+                        .fg(if app.theme_light { Color::Black } else { Color::White })
+                        .bg(if app.theme_light { Color::Gray } else { Color::DarkGray })
+                } else {
+                    Style::default().fg(if app.theme_light { Color::Black } else { Color::White })
+                };
+                let number = if row_index == 0 {
+                    format!("{:>width$} ", index + 1, width = number_width)
+                } else {
+                    format!("{:>width$} ", "", width = number_width)
+                };
+                gutter_lines.push(Line::from(Span::styled(number, gutter_style)));
+                content_lines.push(Line::from(Span::styled(row, text_style)));
+                if content_lines.len() >= height { break; }
             }
-            if visible.len() >= height { break; }
+            if content_lines.len() >= height { break; }
         }
-        let content = Paragraph::new(Text::from(visible))
-            .style(Style::default().fg(if app.theme_light { Color::Black } else { Color::White }))
-            .wrap(Wrap { trim: false });
-        frame.render_widget(content, body);
+        if gutter_width > 0 {
+            frame.render_widget(
+                Paragraph::new(Text::from(gutter_lines)).style(Style::default().bg(if app.theme_light { Color::Reset } else { Color::Reset })),
+                columns[0],
+            );
+        }
+        frame.render_widget(
+            Paragraph::new(Text::from(content_lines)).wrap(Wrap { trim: false }),
+            columns[1],
+        );
         let progress = if reader.document.byte_len == 0 { 0 } else {
             (reader.document.offset_for_line(reader.top).saturating_mul(100) / reader.document.byte_len) as usize
         };
@@ -1517,10 +1555,16 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
         }
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') => { app.close_reader()?; },
-            KeyCode::Down | KeyCode::Char('j') => if let Some(r) = &mut app.reader {
+            KeyCode::Down => if let Some(r) = &mut app.reader {
+                r.advance(app.viewport_width, (app.viewport_height / 2).max(1))?;
+            },
+            KeyCode::Up => if let Some(r) = &mut app.reader {
+                r.retreat(app.viewport_width, (app.viewport_height / 2).max(1))?;
+            },
+            KeyCode::Char('j') => if let Some(r) = &mut app.reader {
                 r.advance(app.viewport_width, 1)?;
             },
-            KeyCode::Up | KeyCode::Char('k') => if let Some(r) = &mut app.reader {
+            KeyCode::Char('k') => if let Some(r) = &mut app.reader {
                 r.retreat(app.viewport_width, 1)?;
             },
             KeyCode::PageDown | KeyCode::Char(' ') => if let Some(r) = &mut app.reader {
@@ -1553,7 +1597,7 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
             KeyCode::Char('N') => if let Some(r) = &mut app.reader {
                 if let Some(prev) = r.chapters.iter().rev().find(|c| c.line < r.top) { r.top = prev.line; r.wrap_offset = 0; }
             },
-            KeyCode::Char('?') => app.status = "j/k 滚动  Space/PageDown 下一页  PageUp 上一页  t 目录  n/N 章节  b 添加书签  B 书签列表  m 添加笔记  M 笔记列表  E 导出笔记  / 搜索  C 本章搜索  K 章节规则  q 返回".into(),
+            KeyCode::Char('?') => app.status = "↑/↓ 半页滚动  j/k 逐行滚动  Space/PageDown 下一页  PageUp 上一页  t 目录  n/N 章节  b 添加书签  B 书签列表  m 添加笔记  M 笔记列表  E 导出笔记  / 搜索  C 本章搜索  K 章节规则  q 返回".into(),
             _ => {}
         }
     }
