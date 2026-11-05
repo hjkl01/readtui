@@ -588,7 +588,7 @@ impl App {
             b_time.cmp(a_time).then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
         });
         self.selected = 0;
-        self.list_state.select(if self.books.is_empty() { None } else { Some(0) });
+        self.refresh_visible_books();
         self.status = "已按最近阅读时间排序".into();
         Ok(())
     }
@@ -1320,7 +1320,10 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
             KeyCode::Char('t') => { app.tag_mode = true; app.input = Some(String::new()); },
             KeyCode::Char('e') => { app.metadata_mode = true; app.input = Some(String::new()); },
             KeyCode::Char('x') => app.clear_selected_tags()?,
-            KeyCode::Char('o') => app.books.sort_by(|a,b| b.favorite.cmp(&a.favorite).then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))),
+            KeyCode::Char('o') => {
+                app.books.sort_by(|a,b| b.favorite.cmp(&a.favorite).then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase())));
+                app.refresh_visible_books();
+            },
             KeyCode::Char('R') => app.sort_by_recent()?,
             KeyCode::Char('F') => {
                 app.library_filter = (app.library_filter + 1) % 5;
