@@ -24,9 +24,10 @@ The SQLite progress record stores:
 
 - line: source line index, retained for compatibility and quick navigation.
 - byte_offset: byte offset of the current source line in the active text stream.
-- wrap_offset: visual row offset within that source line.
+- wrap_offset: visual row offset within that source line (compatibility fallback).
+- char_offset: Unicode character index at the start of the current visual row; it is used to remap the location after terminal-width changes.
 
-The byte offset is independent of terminal width. On restore, the reader maps it back to the closest indexed line and clamps the wrapped-row offset to the current terminal width.
+The byte offset is independent of terminal width. On restore, the reader maps it back to the closest indexed line, then maps the saved character index into the visual rows at the current terminal width. Existing databases are migrated in place.
 
 The initial line-only database is migrated in place by adding missing columns. Existing bookmarks receive the same offset columns.
 
