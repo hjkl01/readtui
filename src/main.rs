@@ -1549,6 +1549,39 @@ mod tests {
     }
 
     #[test]
+    fn prune_missing_removes_stale_book_records() {
+        let db = Connection::open_in_memory().unwrap();
+        init_db(&db).unwrap();
+        db.execute("INSERT INTO library_books(path) VALUES ('/missing/book.txt')", []).unwrap();
+        db.execute("INSERT INTO reading_progress(path,line) VALUES ('/missing/book.txt',3)", []).unwrap();
+        db.execute("INSERT INTO reading_sessions(path) VALUES ('/missing/book.txt')", []).unwrap();
+        assert_eq!(prune_missing_books(&db).unwrap(), 1);
+        let remaining: i64 = db.query_row("SELECT COUNT(*) FROM reading_progress", [], |row| row.get(0)).unwrap();
+        assert_eq!(remaining, 0);
+        let sessions: i64 = db.query_row("SELECT COUNT(*) FROM reading_sessions", [], |row| row.get(0)).unwrap();
+        assert_eq!(sessions, 0);
+    }
+
+    #[test]
+    fn relink_updates_all_book_path_references() {
+        let db = Connection::open_in_memory().unwrap();
+        init_db(&db).unwrap();
+        let target = std::env::temp_dir().join(format!("readtui-relink-{}.txt", std::process::id()));
+        std::fs::write(&target, "正文").unwrap();
+        db.execute("INSERT INTO library_books(path) VALUES ('/old/book.txt')", []).unwrap();
+        db.execute("INSERT INTO reading_progress(path,line) VALUES ('/old/book.txt',4)", []).unwrap();
+        db.execute("INSERT INTO reading_sessions(path) VALUES ('/old/book.txt')", []).unwrap();
+        relink_book_path(&db, Path::new("/old/book.txt"), &target).unwrap();
+        let canonical = target.canonicalize().unwrap().to_string_lossy().to_string();
+        let progress: i64 = db.query_row("SELECT line FROM reading_progress WHERE path=?1", [&canonical], |row| row.get(0)).unwrap();
+        assert_eq!(progress, 4);
+        let sessions: i64 = db.query_row("SELECT COUNT(*) FROM reading_sessions WHERE path=?1", [&canonical], |row| row.get(0)).unwrap();
+        assert_eq!(sessions, 1);
+        drop(db);
+        std::fs::remove_file(target).unwrap();
+    }
+
+    #[test]
     fn character_anchor_survives_terminal_reflow() {
         let text = "第一行第二行第三行第四行";
         let original_row = 1;
