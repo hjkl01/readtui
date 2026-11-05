@@ -47,7 +47,8 @@
 - [x] Read EPUB title and creator metadata
 - [x] Basic Markdown markup cleanup
 - [x] Basic HTML and FB2 text extraction
-- [ ] Evaluate MOBI/AZW3 and PDF support
+- [x] MOBI text extraction for unencrypted PalmDOC/HUFF books
+- [ ] KF8/AZW3 reconstruction and PDF support
 
 ## Phase 5 — Statistics and polish
 
