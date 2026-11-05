@@ -39,6 +39,8 @@
 ## Phase 4 — Formats
 
 - [x] EPUB 2/3 spine extraction and cached text reading
+- [x] EPUB 2 NCX / EPUB 3 nav chapter-label extraction
+- [x] Read EPUB title and creator metadata
 - [x] Basic Markdown markup cleanup
 - [x] Basic HTML and FB2 text extraction
 - [ ] Evaluate MOBI/AZW3 and PDF support
@@ -48,7 +50,7 @@
 - [x] Reading session duration and total/today/rolling-week/month statistics
 - [x] Daily reading goal
 - [x] Light/dark theme toggle
-- [ ] Reading streaks
+- [x] Reading streaks (consecutive calendar days with a reading session)
 - [ ] User-defined key bindings and configurable typography
 - [ ] Database backup/import/export and orphan cleanup
 - [x] Windows/macOS/Linux release binary workflow on version tags
