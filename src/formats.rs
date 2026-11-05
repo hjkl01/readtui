@@ -18,7 +18,7 @@ fn cache_path(source: &Path, cache_dir: &Path, kind: &str) -> Result<PathBuf> {
 pub(crate) fn html_to_text(source: &str) -> String {
     // EPUB/MOBI markup is often HTML-like rather than well-formed XML.
     // HTML5 parsing tolerates unquoted attributes and legacy markup.
-    let scripts = Regex::new(r"(?is)<script\\b[^>]*>.*?</script\\s*>|<style\\b[^>]*>.*?</style\\s*>").unwrap();
+    let scripts = Regex::new(r"(?is)<script\b[^>]*>.*?</script\s*>|<style\b[^>]*>.*?</style\s*>").unwrap();
     let clean = scripts.replace_all(source, "");
     let document = Html::parse_document(&clean);
     let blocks = Selector::parse("p, h1, h2, h3, h4, h5, h6, li, blockquote, pre, td, th").unwrap();
@@ -36,7 +36,7 @@ pub(crate) fn html_to_text(source: &str) -> String {
             if !text.is_empty() { lines.push(text); }
         }
     }
-    lines.join("\\n")
+    lines.join("\n")
 }
 
 pub fn mobi_metadata(source: &Path) -> Result<(Option<String>, Option<String>)> {
@@ -128,7 +128,7 @@ mod tests {
     #[test]
     fn html5_parser_accepts_unquoted_attributes_and_doctype() {
         let text = html_to_text(r#"<!doctype html><html><head><meta http-equiv=Content-Type content=text/html></head><body><p>第一段</p><p>第二段</p></body></html>"#);
-        assert_eq!(text, "第一段\\n第二段");
+        assert_eq!(text, "第一段\n第二段");
     }
 
     #[test]
