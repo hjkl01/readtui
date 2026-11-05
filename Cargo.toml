@@ -23,6 +23,8 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 unicode-width = "0.2"
 walkdir = "2"
 roxmltree = "0.20"
+scraper = "0.22"
+mobi = "0.8"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [profile.release]
