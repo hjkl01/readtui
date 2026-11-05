@@ -187,6 +187,7 @@ struct App {
     horizontal_margin: u16,
     vertical_margin: u16,
     library_search_mode: bool,
+    chapter_search_mode: bool,
     show_search_results: bool,
     search_results: Vec<SearchResult>,
     search_selected: usize,
@@ -290,6 +291,7 @@ fn main() -> Result<()> {
         horizontal_margin,
         vertical_margin,
         library_search_mode: false,
+        chapter_search_mode: false,
         show_search_results: false,
         search_results: Vec::new(),
         search_selected: 0,
@@ -1014,6 +1016,32 @@ impl App {
         Ok(())
     }
 
+    fn search_current_chapter(&mut self, query: &str) -> Result<()> {
+        let Some(reader) = &mut self.reader else { return Ok(()); };
+        if query.is_empty() { return Ok(()); }
+        let start = reader.chapters.iter().rposition(|chapter| chapter.line <= reader.top)
+            .map(|index| reader.chapters[index].line).unwrap_or(0);
+        let end = reader.chapters.iter().find(|chapter| chapter.line > reader.top)
+            .map(|chapter| chapter.line).unwrap_or(reader.line_count());
+        let needle = query.to_lowercase();
+        let mut found = None;
+        for line in reader.top.saturating_add(1)..end {
+            if reader.document.read_line(line)?.to_lowercase().contains(&needle) { found = Some(line); break; }
+        }
+        if found.is_none() {
+            for line in start..reader.top.min(end) {
+                if reader.document.read_line(line)?.to_lowercase().contains(&needle) { found = Some(line); break; }
+            }
+        }
+        if let Some(line) = found {
+            reader.jump_to_line(line);
+            self.status = format!("本章内找到匹配内容：第 {} 行", line + 1);
+        } else {
+            self.status = "当前章节没有找到匹配内容".into();
+        }
+        Ok(())
+    }
+
     fn search_library(&mut self, query: &str) -> Result<()> {
         self.search_results.clear();
         let books = self.books.clone();
@@ -1197,7 +1225,7 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
     if let Some(input) = &app.input {
         let popup = centered_rect(60, 20, area);
         frame.render_widget(Clear, popup);
-        let title = if app.directory_import_mode { "输入要导入的目录路径" } else if app.export_mode { "导出笔记/书签的 Markdown 文件路径" } else if app.annotation_edit_mode { "编辑笔记内容" } else if app.goal_mode { "每日阅读目标（分钟）" } else if app.typography_mode { "阅读边距：横向,纵向（例如 3,1）" } else if app.library_search_mode { "跨书搜索关键词" } else if app.annotation_mode { "为当前段落添加笔记" } else if app.tag_filter_mode { "按标签筛选（留空清除）" } else if app.tag_mode { "输入标签名称" } else if app.metadata_mode { "编辑书名|作者（作者可留空）" } else if app.screen == Screen::Reader { "搜索当前书籍" } else { "输入文件路径" };
+        let title = if app.directory_import_mode { "输入要导入的目录路径" } else if app.export_mode { "导出笔记/书签的 Markdown 文件路径" } else if app.annotation_edit_mode { "编辑笔记内容" } else if app.goal_mode { "每日阅读目标（分钟）" } else if app.typography_mode { "阅读边距：横向,纵向（例如 3,1）" } else if app.library_search_mode { "跨书搜索关键词" } else if app.chapter_search_mode { "搜索当前章节" } else if app.annotation_mode { "为当前段落添加笔记" } else if app.tag_filter_mode { "按标签筛选（留空清除）" } else if app.tag_mode { "输入标签名称" } else if app.metadata_mode { "编辑书名|作者（作者可留空）" } else if app.screen == Screen::Reader { "搜索当前书籍" } else { "输入文件路径" };
         frame.render_widget(Paragraph::new(input.as_str()).block(Block::default().title(title).borders(Borders::ALL)), popup);
     }
 }
@@ -1242,6 +1270,7 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 app.typography_mode = false;
                 app.tag_filter_mode = false;
                 app.library_search_mode = false;
+                app.chapter_search_mode = false;
             },
             KeyCode::Enter => {
                 let value = input.clone(); app.input = None;
@@ -1263,6 +1292,9 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 } else if app.library_search_mode {
                     app.library_search_mode = false;
                     app.search_library(&value)?;
+                } else if app.chapter_search_mode {
+                    app.chapter_search_mode = false;
+                    app.search_current_chapter(&value)?;
                 } else if app.annotation_mode {
                     app.annotation_mode = false;
                     if !value.trim().is_empty() { app.add_annotation(value.trim())?; }
@@ -1449,13 +1481,14 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
             KeyCode::Char('E') => { app.export_mode = true; app.input = Some(String::new()); },
             KeyCode::Char('m') => { app.annotation_mode = true; app.input = Some(String::new()); },
             KeyCode::Char('/') => app.input = Some(String::new()),
+            KeyCode::Char('C') => { app.chapter_search_mode = true; app.input = Some(String::new()); },
             KeyCode::Char('n') => if let Some(r) = &mut app.reader {
                 if let Some(next) = r.chapters.iter().find(|c| c.line > r.top) { r.top = next.line; r.wrap_offset = 0; }
             },
             KeyCode::Char('N') => if let Some(r) = &mut app.reader {
                 if let Some(prev) = r.chapters.iter().rev().find(|c| c.line < r.top) { r.top = prev.line; r.wrap_offset = 0; }
             },
-            KeyCode::Char('?') => app.status = "j/k 滚动  Space/PageDown 下一页  PageUp 上一页  t 目录  n/N 章节  b 添加书签  B 书签列表  m 添加笔记  M 笔记列表  E 导出笔记  / 搜索  q 返回".into(),
+            KeyCode::Char('?') => app.status = "j/k 滚动  Space/PageDown 下一页  PageUp 上一页  t 目录  n/N 章节  b 添加书签  B 书签列表  m 添加笔记  M 笔记列表  E 导出笔记  / 搜索  C 本章搜索  q 返回".into(),
             _ => {}
         }
     }
