@@ -934,11 +934,12 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
     frame.render_widget(title, chunks[0]);
 
     if app.screen == Screen::Library {
-        let items: Vec<ListItem> = app.books.iter().map(|book| {
+        let items: Vec<ListItem> = app.visible_books.iter().filter_map(|index| app.books.get(*index)).map(|book| {
             let path = book.path.strip_prefix(&app.library_dir).unwrap_or(&book.path);
             ListItem::new(format!("{}{} [{}] {}  {}   {}", if book.favorite { "★ " } else { "" }, book.title, match book.status.as_str() { "reading" => "阅读中", "finished" => "已读完", _ => "未读" }, if book.author.is_empty() { String::new() } else { format!("· {} ", book.author) }, book.tags.join(","), path.display())).style(Style::default().fg(if book.tags.is_empty() { Color::White } else { Color::Cyan }))
         }).collect();
-        let list = List::new(items).block(Block::default().title(format!("书库 · {} 本", app.books.len())).borders(Borders::ALL))
+        let filter_label = match app.library_filter { 1 => "收藏", 2 => "阅读中", 3 => "未读", 4 => "已读完", _ => "全部" };
+        let list = List::new(items).block(Block::default().title(format!("书库 · {} 本 / {filter_label}", app.visible_books.len())).borders(Borders::ALL))
             .highlight_style(Style::default().bg(if app.theme_light { Color::Gray } else { Color::DarkGray }).fg(if app.theme_light { Color::Black } else { Color::White }).add_modifier(Modifier::BOLD))
             .highlight_symbol("▶ ");
         frame.render_stateful_widget(list, chunks[1], &mut app.list_state);
