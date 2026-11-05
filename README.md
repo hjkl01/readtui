@@ -13,14 +13,16 @@ The first development milestone provides a working foundation:
 - Convert EPUB spine chapters (including NCX/nav chapter labels), Markdown, HTML, and FB2 into a cached plain-text reading stream.
 - Import EPUB title and creator metadata as defaults when opening a book.
 - Open a book directly from the command line or from the library screen.
-- Decode UTF-8, GB18030/GBK-compatible text, and Big5 fallback.
+- Decode UTF-8, BOM-marked UTF-16 LE/BE, GB18030/GBK-compatible text, and Big5 fallback.
 - Detect common Chinese and English chapter headings.
 - Navigate with Vim-style keys, visual-row-aware page keys, and an interactive chapter list.
 - Wrap CJK text by terminal cell width and keep common opening/closing punctuation with adjacent text.
 - Persist byte offsets, source line, wrapped-row offset, and a source-character anchor (so reading position survives terminal resizing), plus bookmarks, annotations, and reading sessions in SQLite, with automatic migration from the original schema.
 - Browse, jump to, and delete bookmarks; save paragraph notes and excerpts.
 - Search the current book or search across the local library.
-- Manage book title, author, tags, favorites, and reading status.
+- Manage book title, author, tags, favorites, and reading status; filter by favorite/status and tag.
+- Configure reading-area margins; back up and restore the SQLite database.
+- Detect duplicate files by content fingerprint, relink moved/missing books, and prune stale database records.
 - Track reading time, consecutive reading days, and a daily reading goal; switch between light and dark themes.
 
 The current format pipeline extracts EPUB 2/3 spine content, uses NCX/nav labels as chapter headings where available, and reads OPF title/creator metadata. It converts Markdown, HTML, and FB2 to cached text. A hierarchical EPUB navigation tree, images, footnotes, and advanced semantic formatting are not yet represented.
@@ -63,6 +65,18 @@ Open a file directly:
 readtui ./novels/三体.txt
 ```
 
+Database maintenance:
+
+```bash
+readtui --backup ./readtui-backup.db
+readtui --restore ./readtui-backup.db
+readtui --duplicates --library ./novels
+readtui --prune-missing
+readtui --relink "/old/path/book.txt=/new/path/book.txt"
+```
+
+`--prune-missing` removes stale book metadata, progress, bookmarks, notes, and tag links. `--relink` migrates a book's path references to an existing file.
+
 From the library screen, press `a` and enter a file path to open a file outside the library directory.
 
 ## Keys
@@ -84,6 +98,9 @@ Library:
 | `x` | Clear tags on selected book |
 | `o` | Sort favorites first |
 | `R` | Sort by recent reading progress |
+| `F` | Cycle all / favorite / reading / unread / finished filters |
+| `T` | Filter by tag (empty input clears tag filter) |
+| `P` | Configure horizontal and vertical reading margins (`horizontal,vertical`) |
 | `G` | Set daily reading goal in minutes |
 | `c` | Toggle light/dark theme |
 | `S` | Reading statistics (today, rolling 7 days, month, total, reading streak) |
