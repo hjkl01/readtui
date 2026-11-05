@@ -4,7 +4,7 @@
 
 - [x] Rust CLI and cross-platform terminal setup
 - [x] Local TXT/Markdown library scan
-- [x] UTF-8 and legacy Chinese encoding fallback
+- [x] UTF-8, BOM-marked UTF-16 LE/BE, and legacy Chinese encoding fallback
 - [x] Basic Chinese/English chapter heading detection
 - [x] Keyboard navigation and interactive chapter list
 - [x] SQLite reading progress and bookmarks
@@ -13,7 +13,8 @@
 - [x] Stable byte-offset + source-line + wrapped-row progress, with legacy database migration
 - [x] Large plain-text file streaming and byte-offset line index
 - [x] Light/dark theme toggle and daily reading goal
-- [ ] Configurable margins, paragraph spacing, and user-defined typography
+- [x] Configurable horizontal and vertical reading margins
+- [ ] Paragraph spacing and user-defined typography
 
 ## Phase 2 — Library management
 
@@ -21,10 +22,13 @@
 - [x] Batch directory import and library rescan command
 - [x] Book title and author editing
 - [x] Tags, favorites, and unread/reading/finished status
-- [ ] Collections and tag-based filtering
-- [ ] Duplicate detection and missing-file relinking
+- [ ] Collections and hierarchical grouping
+- [x] Tag-based filtering
+- [x] Content-fingerprint duplicate detection
+- [x] Missing-file path relinking and stale-record cleanup
 - [x] Recent books sorting and favorites-first sorting
-- [ ] Status/tag filters and multi-column sorting
+- [x] Favorite/status filters and tag filters
+- [ ] Multi-column sorting
 
 ## Phase 3 — Reading tools
 
@@ -52,5 +56,6 @@
 - [x] Light/dark theme toggle
 - [x] Reading streaks (consecutive calendar days with a reading session)
 - [ ] User-defined key bindings and configurable typography
-- [ ] Database backup/import/export and orphan cleanup
+- [x] SQLite database backup and integrity-checked restore
+- [x] Orphan book/tag cleanup
 - [x] Windows/macOS/Linux release binary workflow on version tags
