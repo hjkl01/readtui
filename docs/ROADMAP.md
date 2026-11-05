@@ -36,7 +36,7 @@
 - [x] Paragraph annotations and excerpts with jump/delete
 - [x] Current-book and cross-library literal search
 - [x] Annotation editing and Markdown export
-- [ ] Chapter-only search
+- [x] Chapter-only search
 - [ ] Configurable chapter detection rules
 - [x] Exact character-column restoration within a source line after reflow
 
