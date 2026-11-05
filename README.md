@@ -10,7 +10,8 @@ The first development milestone provides a working foundation:
 
 - Browse local `.txt`, `.md`, `.markdown`, `.epub`, `.html`, `.htm`, and `.fb2` books recursively.
 - Read large plain-text files through a byte-offset line index instead of loading the entire book into a `Vec<String>`.
-- Convert EPUB spine chapters, Markdown, HTML, and FB2 into a cached plain-text reading stream.
+- Convert EPUB spine chapters (including NCX/nav chapter labels), Markdown, HTML, and FB2 into a cached plain-text reading stream.
+- Import EPUB title and creator metadata as defaults when opening a book.
 - Open a book directly from the command line or from the library screen.
 - Decode UTF-8, GB18030/GBK-compatible text, and Big5 fallback.
 - Detect common Chinese and English chapter headings.
@@ -20,9 +21,9 @@ The first development milestone provides a working foundation:
 - Browse, jump to, and delete bookmarks; save paragraph notes and excerpts.
 - Search the current book or search across the local library.
 - Manage book title, author, tags, favorites, and reading status.
-- Track reading time and a daily reading goal; switch between light and dark themes.
+- Track reading time, consecutive reading days, and a daily reading goal; switch between light and dark themes.
 
-The current format pipeline extracts EPUB 2/3 spine content and converts Markdown, HTML, and FB2 to cached text. EPUB navigation landmarks and advanced semantic formatting are not yet fully represented.
+The current format pipeline extracts EPUB 2/3 spine content, uses NCX/nav labels as chapter headings where available, and reads OPF title/creator metadata. It converts Markdown, HTML, and FB2 to cached text. A hierarchical EPUB navigation tree, images, footnotes, and advanced semantic formatting are not yet represented.
 
 ## Install
 
@@ -85,7 +86,7 @@ Library:
 | `R` | Sort by recent reading progress |
 | `G` | Set daily reading goal in minutes |
 | `c` | Toggle light/dark theme |
-| `S` | Reading statistics (today, rolling 7 days, month, total) |
+| `S` | Reading statistics (today, rolling 7 days, month, total, reading streak) |
 | `q` | Quit |
 
 Reader:
