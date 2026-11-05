@@ -223,6 +223,10 @@ fn main() -> Result<()> {
         drop(backup);
         let temporary = database_path.with_extension("restore.tmp");
         fs::copy(&source, &temporary)?;
+        for suffix in ["-wal", "-shm"] {
+            let sidecar = PathBuf::from(format!("{}{}", database_path.display(), suffix));
+            if sidecar.exists() { fs::remove_file(sidecar)?; }
+        }
         fs::rename(&temporary, &database_path)
             .with_context(|| "无法替换数据库；请先关闭其他 readtui 实例")?;
         println!("数据库已从 {} 恢复", source.display());
