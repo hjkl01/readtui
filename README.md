@@ -17,7 +17,7 @@ The first development milestone provides a working foundation:
 - Detect common Chinese and English chapter headings.
 - Navigate with Vim-style keys, visual-row-aware page keys, and an interactive chapter list.
 - Wrap CJK text by terminal cell width and keep common opening/closing punctuation with adjacent text.
-- Persist byte offsets, source line, wrapped-row offset, bookmarks, annotations, and reading sessions in SQLite, with automatic migration from the original schema.
+- Persist byte offsets, source line, wrapped-row offset, and a source-character anchor (so reading position survives terminal resizing), plus bookmarks, annotations, and reading sessions in SQLite, with automatic migration from the original schema.
 - Browse, jump to, and delete bookmarks; save paragraph notes and excerpts.
 - Search the current book or search across the local library.
 - Manage book title, author, tags, favorites, and reading status.
