@@ -348,7 +348,7 @@ fn print_duplicate_books(root: &Path) -> Result<()> {
         if !entry.file_type().is_file() { continue; }
         let path = entry.path();
         let ext = path.extension().and_then(|value| value.to_str()).unwrap_or("").to_ascii_lowercase();
-        if !matches!(ext.as_str(), "txt" | "md" | "markdown" | "epub" | "html" | "htm" | "fb2") { continue; }
+        if !matches!(ext.as_str(), "txt" | "md" | "markdown" | "epub" | "html" | "htm" | "fb2" | "mobi") { continue; }
         let fingerprint = content_fingerprint(path)?;
         groups.entry(fingerprint).or_default().push(path.to_path_buf());
     }
@@ -504,7 +504,7 @@ fn reader_source_path(path: &Path) -> Result<PathBuf> {
     let cache_dir = dirs::cache_dir().unwrap_or_else(|| std::env::temp_dir()).join("readtui/formats");
     match path.extension().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase().as_str() {
         "epub" => epub::extract_to_cache(path, &cache_dir.join("epub")),
-        "md" | "markdown" | "html" | "htm" | "fb2" => formats::to_cache(path, &cache_dir),
+        "md" | "markdown" | "html" | "htm" | "fb2" | "mobi" => formats::to_cache(path, &cache_dir),
         _ => Ok(path.to_path_buf()),
     }
 }
@@ -592,7 +592,7 @@ impl App {
             if !entry.file_type().is_file() { continue; }
             let path = entry.path().canonicalize().unwrap_or_else(|_| entry.path().to_path_buf());
             let ext = path.extension().and_then(|value| value.to_str()).unwrap_or("").to_ascii_lowercase();
-            if !matches!(ext.as_str(), "txt" | "md" | "markdown" | "epub" | "html" | "htm" | "fb2") { continue; }
+            if !matches!(ext.as_str(), "txt" | "md" | "markdown" | "epub" | "html" | "htm" | "fb2" | "mobi") { continue; }
             if self.books.iter().any(|book| book.path == path) { continue; }
             self.db.execute("INSERT OR IGNORE INTO library_books(path) VALUES (?1)", [path.to_string_lossy().as_ref()])?;
             let title = path.file_stem().and_then(|value| value.to_str()).unwrap_or("未命名").to_string();
@@ -679,10 +679,16 @@ impl App {
             let title = path.file_stem().and_then(|s| s.to_str()).unwrap_or("未命名").to_string();
             Book { path: path.clone(), title, author: String::new(), favorite: false, status: "unread".into(), tags: Vec::new() }
         });
-        if path.extension().and_then(|value| value.to_str()).is_some_and(|value| value.eq_ignore_ascii_case("epub"))
+        let extension = path.extension().and_then(|value| value.to_str()).unwrap_or("");
+        if (extension.eq_ignore_ascii_case("epub") || extension.eq_ignore_ascii_case("mobi"))
             && book.author.is_empty()
         {
-            if let Ok((title, author)) = epub::read_metadata(&path) {
+            let metadata = if extension.eq_ignore_ascii_case("epub") {
+                epub::read_metadata(&path)
+            } else {
+                formats::mobi_metadata(&path)
+            };
+            if let Ok((title, author)) = metadata {
                 if let Some(title) = title {
                     let filename_title = path.file_stem().and_then(|value| value.to_str()).unwrap_or("");
                     if book.title == filename_title { book.title = title; }
