@@ -191,9 +191,10 @@ pub fn extract_to_cache(path: &Path, cache_dir: &Path) -> Result<PathBuf> {
         if !chapter.trim().is_empty() {
             let mut content = chapter.trim().to_string();
             if let Some(title) = navigation.get(&member) {
-                if content.lines().next().map(str::trim) != Some(title.as_str()) {
-                    content = format!("{title}\n{content}");
+                if content.lines().next().map(str::trim) == Some(title.as_str()) {
+                    content = content.lines().skip(1).collect::<Vec<_>>().join("\n");
                 }
+                content = format!("第{}章 {}\n{}", chapters.len() + 1, title, content);
             }
             chapters.push(content);
         }
