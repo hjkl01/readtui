@@ -78,6 +78,29 @@ fn xhtml_to_text(source: &str) -> Result<String> {
     Ok(lines.join("\n"))
 }
 
+
+pub fn read_metadata(path: &Path) -> Result<(Option<String>, Option<String>)> {
+    let file = File::open(path)?;
+    let mut archive = ZipArchive::new(file).context("不是有效的 EPUB/ZIP 文件")?;
+    let container = entry_text(&mut archive, "META-INF/container.xml")?;
+    let container_xml = Document::parse(&container).context("EPUB container.xml 格式错误")?;
+    let opf_path = container_xml.descendants()
+        .find(|node| node.has_tag_name("rootfile"))
+        .and_then(|node| node.attribute("full-path"))
+        .ok_or_else(|| anyhow!("EPUB 未声明 package 文档"))?;
+    let opf = entry_text(&mut archive, opf_path)?;
+    let package = Document::parse(&opf).context("EPUB OPF 格式错误")?;
+    let metadata = package.descendants().find(|node| node.has_tag_name("metadata"));
+    let Some(metadata) = metadata else { return Ok((None, None)); };
+    let title = metadata.descendants()
+        .find(|node| node.is_element() && node.tag_name().name() == "title")
+        .map(node_text).filter(|value| !value.is_empty());
+    let creator = metadata.descendants()
+        .find(|node| node.is_element() && node.tag_name().name() == "creator")
+        .map(node_text).filter(|value| !value.is_empty());
+    Ok((title, creator))
+}
+
 pub fn extract_to_cache(path: &Path, cache_dir: &Path) -> Result<PathBuf> {
     fs::create_dir_all(cache_dir)?;
     let metadata = fs::metadata(path)?;
@@ -184,6 +207,17 @@ pub fn extract_to_cache(path: &Path, cache_dir: &Path) -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_title_and_creator_metadata() {
+        let source = r#"<package xmlns:dc="http://purl.org/dc/elements/1.1/"><metadata><dc:title>示例书名</dc:title><dc:creator>示例作者</dc:creator></metadata></package>"#;
+        let parsed = Document::parse(source).unwrap();
+        let metadata = parsed.descendants().find(|node| node.has_tag_name("metadata")).unwrap();
+        let title = metadata.descendants().find(|node| node.tag_name().name() == "title").map(node_text);
+        let creator = metadata.descendants().find(|node| node.tag_name().name() == "creator").map(node_text);
+        assert_eq!(title.as_deref(), Some("示例书名"));
+        assert_eq!(creator.as_deref(), Some("示例作者"));
+    }
 
     #[test]
     fn strips_xhtml_into_readable_paragraphs() {
