@@ -310,6 +310,15 @@ fn init_db(db: &Connection) -> Result<()> {
         add_column_if_missing(db, "reading_progress", column, definition)?;
         add_column_if_missing(db, "bookmarks", column, definition)?;
     }
+    // Recover abandoned sessions left open by a crash or forced shutdown.
+    // Keep a 24-hour grace period so another active instance is not interrupted.
+    db.execute(
+        "UPDATE reading_sessions
+         SET ended_at=CURRENT_TIMESTAMP,
+             duration_seconds=MIN(MAX(CAST((julianday('now')-julianday(started_at))*86400 AS INTEGER),0),7200)
+         WHERE ended_at IS NULL AND started_at < datetime('now','-1 day')",
+        [],
+    )?;
     Ok(())
 }
 
@@ -655,10 +664,31 @@ impl App {
              FROM reading_sessions", [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?))
         )?;
         let goal = load_setting(&self.db, "daily_goal_minutes")?.parse::<i64>().unwrap_or(30);
+        let streak: i64 = self.db.query_row(
+            "WITH RECURSIVE
+             reading_days(day) AS (
+               SELECT DISTINCT date(started_at,'localtime')
+               FROM reading_sessions
+               WHERE duration_seconds > 0 OR ended_at IS NULL
+             ),
+             anchor(day) AS (
+               SELECT MAX(day) FROM reading_days
+               WHERE day >= date('now','localtime','-1 day')
+             ),
+             streak(day,n) AS (
+               SELECT day,1 FROM anchor
+               UNION ALL
+               SELECT date(streak.day,'-1 day'),streak.n+1
+               FROM streak JOIN reading_days
+                 ON reading_days.day=date(streak.day,'-1 day')
+             )
+             SELECT COALESCE(MAX(n),0) FROM streak",
+            [], |row| row.get(0)
+        )?;
         let hours = total / 3600;
         let minutes = (total % 3600) / 60;
         self.statistics = Some(format!(
-            "累计阅读：{hours} 小时 {minutes} 分钟\n阅读会话：{sessions} 次\n今日：{} 分钟 / 目标 {goal} 分钟\n近 7 天：{} 分钟\n本月：{} 分钟\n\n按 Esc 关闭",
+            "累计阅读：{hours} 小时 {minutes} 分钟\n阅读会话：{sessions} 次\n今日：{} 分钟 / 目标 {goal} 分钟\n近 7 天：{} 分钟\n本月：{} 分钟\n\n连续阅读：{streak} 天\\n\\n按 Esc 关闭",
             today / 60, week / 60, month / 60
         ));
         Ok(())
