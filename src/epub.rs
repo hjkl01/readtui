@@ -192,7 +192,7 @@ pub fn extract_to_cache(path: &Path, cache_dir: &Path) -> Result<PathBuf> {
             let mut content = chapter.trim().to_string();
             if let Some(title) = navigation.get(&member) {
                 if content.lines().next().map(str::trim) != Some(title.as_str()) {
-                    content = format!("{title}\\n{content}");
+                    content = format!("{title}\n{content}");
                 }
             }
             chapters.push(content);
