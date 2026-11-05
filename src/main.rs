@@ -34,8 +34,12 @@ use document::{Chapter, Document};
 #[derive(Parser, Debug)]
 #[command(name = "readtui", version, about = "终端小说阅读器与本地书库管理工具")]
 struct Args {
-    /// 直接打开一本小说
+    /// 直接打开一本小说（也可以使用位置参数）
+    #[arg(short = 'f', long = "file", value_name = "PATH", conflicts_with = "input")]
     file: Option<PathBuf>,
+    /// 文件路径（兼容简写：readtui <PATH>）
+    #[arg(value_name = "PATH")]
+    input: Option<PathBuf>,
     /// 指定书库目录（默认 ~/Books）
     #[arg(short, long)]
     library: Option<PathBuf>,
@@ -318,7 +322,10 @@ fn main() -> Result<()> {
 
     app.list_state.select(if app.books.is_empty() { None } else { Some(0) });
 
-    if let Some(file) = args.file {
+    if let Some(file) = args.file.or(args.input) {
+        if !file.is_file() {
+            anyhow::bail!("书籍文件不存在或不是普通文件：{}", file.display());
+        }
         let path = file.canonicalize().unwrap_or(file);
         app.open_book(path)?;
     }
