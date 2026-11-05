@@ -460,6 +460,7 @@ impl App {
         }
         self.books.sort_by(|a,b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
         load_book_metadata(&self.db, &mut self.books)?;
+        self.refresh_visible_books();
         self.status = format!("目录导入完成，新增 {imported} 本书");
         Ok(imported)
     }
@@ -489,8 +490,7 @@ impl App {
         load_registered_books(&self.db, &mut books)?;
         load_book_metadata(&self.db, &mut books)?;
         self.books = books;
-        self.selected = self.selected.min(self.books.len().saturating_sub(1));
-        self.list_state.select(if self.books.is_empty() { None } else { Some(self.selected) });
+        self.refresh_visible_books();
         self.status = format!("书库扫描完成，共 {} 本书", self.books.len());
         Ok(())
     }
@@ -813,6 +813,7 @@ impl App {
             )?;
             self.status = if book.favorite { "已加入收藏".into() } else { "已取消收藏".into() };
         }
+        self.refresh_visible_books();
         Ok(())
     }
 
@@ -831,6 +832,7 @@ impl App {
             )?;
             self.status = format!("阅读状态：{}", match book.status.as_str() { "reading" => "阅读中", "finished" => "已读完", _ => "未读" });
         }
+        self.refresh_visible_books();
         Ok(())
     }
 
