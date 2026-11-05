@@ -256,6 +256,8 @@ fn main() -> Result<()> {
     load_registered_books(&db, &mut books)?;
     load_book_metadata(&db, &mut books)?;
     let theme_light = load_setting(&db, "theme").unwrap_or_else(|_| "dark".into()) == "light";
+    let horizontal_margin = load_setting(&db, "horizontal_margin").ok().and_then(|value| value.parse::<u16>().ok()).filter(|value| *value <= 20).unwrap_or(3);
+    let vertical_margin = load_setting(&db, "vertical_margin").ok().and_then(|value| value.parse::<u16>().ok()).filter(|value| *value <= 5).unwrap_or(1);
     let mut app = App {
         screen: Screen::Library,
         visible_books: (0..books.len()).collect(),
@@ -285,8 +287,8 @@ fn main() -> Result<()> {
         metadata_mode: false,
         goal_mode: false,
         typography_mode: false,
-        horizontal_margin: load_setting(&db, "horizontal_margin").ok().and_then(|value| value.parse::<u16>().ok()).filter(|value| *value <= 20).unwrap_or(3),
-        vertical_margin: load_setting(&db, "vertical_margin").ok().and_then(|value| value.parse::<u16>().ok()).filter(|value| *value <= 5).unwrap_or(1),
+        horizontal_margin,
+        vertical_margin,
         library_search_mode: false,
         show_search_results: false,
         search_results: Vec::new(),
