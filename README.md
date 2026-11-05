@@ -10,7 +10,7 @@ The first development milestone provides a working foundation:
 
 - Browse local `.txt`, `.md`, `.markdown`, `.epub`, `.html`, `.htm`, `.fb2`, and `.mobi` books recursively.
 - Read large plain-text files through a byte-offset line index instead of loading the entire book into a `Vec<String>`.
-- Convert EPUB spine chapters (including NCX/nav chapter labels), Markdown, HTML, and FB2 into a cached plain-text reading stream.
+- Convert EPUB spine chapters (including NCX/nav chapter labels), MOBI text records, Markdown, HTML, and FB2 into a cached plain-text reading stream.
 - Import EPUB title and creator metadata as defaults when opening a book.
 - Open a book directly from the command line or from the library screen.
 - Decode UTF-8, BOM-marked UTF-16 LE/BE, GB18030/GBK-compatible text, and Big5 fallback.
