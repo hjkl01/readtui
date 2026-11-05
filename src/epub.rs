@@ -83,7 +83,7 @@ fn strip_doctype(source: &str) -> String {
                 if byte == active_quote { quote = None; }
             } else {
                 match byte {
-                    b'\\'' | b'"' => quote = Some(byte),
+                    b'\'' | b'"' => quote = Some(byte),
                     b'[' => subset_depth += 1,
                     b']' => subset_depth = subset_depth.saturating_sub(1),
                     b'>' if subset_depth == 0 => { index += 1; break; }
