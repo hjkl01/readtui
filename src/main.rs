@@ -1007,12 +1007,14 @@ fn char_offset_for_wrap_offset(text: &str, width: usize, wrap_offset: usize) -> 
 }
 
 fn wrap_offset_for_char_offset(text: &str, width: usize, char_offset: usize) -> usize {
+    let rows = layout::wrap_line(text, width);
     let mut consumed = 0usize;
-    for (index, row) in layout::wrap_line(text, width).iter().enumerate() {
-        if consumed >= char_offset { return index; }
-        consumed += row.chars().count();
+    for (index, row) in rows.iter().enumerate() {
+        let row_end = consumed + row.chars().count();
+        if char_offset < row_end { return index; }
+        consumed = row_end;
     }
-    layout::wrap_line(text, width).len().saturating_sub(1)
+    rows.len().saturating_sub(1)
 }
 
 fn centered_rect(width: u16, height: u16, area: ratatui::layout::Rect) -> ratatui::layout::Rect {
