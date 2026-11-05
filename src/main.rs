@@ -515,7 +515,7 @@ fn scan_books(root: &Path) -> Vec<Book> {
         if !entry.file_type().is_file() { continue; }
         let path = entry.path();
         let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase();
-        if matches!(ext.as_str(), "txt" | "md" | "markdown" | "epub" | "html" | "htm" | "fb2") {
+        if matches!(ext.as_str(), "txt" | "md" | "markdown" | "epub" | "html" | "htm" | "fb2" | "mobi") {
             let title = path.file_stem().and_then(|s| s.to_str()).unwrap_or("未命名").to_string();
             books.push(Book { path: path.to_path_buf(), title, author: String::new(), favorite: false, status: "unread".into(), tags: Vec::new() });
         }
