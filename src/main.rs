@@ -20,8 +20,10 @@ use ratatui::{
 };
 use rusqlite::{params, Connection, OptionalExtension};
 use std::{
+    collections::HashMap,
     fs,
-    io::{self, stdout},
+    hash::{Hash, Hasher},
+    io::{self, stdout, Read},
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -42,6 +44,15 @@ struct Args {
     /// 从数据库备份恢复并退出
     #[arg(long, conflicts_with = "backup")]
     restore: Option<PathBuf>,
+    /// 输出书库中的重复文件分组并退出
+    #[arg(long)]
+    duplicates: bool,
+    /// 清理数据库中已不存在的书籍记录并退出
+    #[arg(long)]
+    prune_missing: bool,
+    /// 重新关联丢失文件，格式：旧路径=新路径
+    #[arg(long)]
+    relink: Option<String>,
 }
 
 #[derive(Clone)]
@@ -277,6 +288,74 @@ fn main() -> Result<()> {
     let result = run_app(&mut terminal, &mut app);
     restore_terminal(&mut terminal)?;
     result
+}
+
+
+fn content_fingerprint(path: &Path) -> Result<(u64, u64)> {
+    let mut file = fs::File::open(path)?;
+    let size = file.metadata()?.len();
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let count = file.read(&mut buffer)?;
+        if count == 0 { break; }
+        buffer[..count].hash(&mut hasher);
+    }
+    Ok((size, hasher.finish()))
+}
+
+fn print_duplicate_books(root: &Path) -> Result<()> {
+    let mut groups: HashMap<(u64, u64), Vec<PathBuf>> = HashMap::new();
+    for entry in WalkDir::new(root).follow_links(false).into_iter().filter_map(|entry| entry.ok()) {
+        if !entry.file_type().is_file() { continue; }
+        let path = entry.path();
+        let ext = path.extension().and_then(|value| value.to_str()).unwrap_or("").to_ascii_lowercase();
+        if !matches!(ext.as_str(), "txt" | "md" | "markdown" | "epub" | "html" | "htm" | "fb2") { continue; }
+        let fingerprint = content_fingerprint(path)?;
+        groups.entry(fingerprint).or_default().push(path.to_path_buf());
+    }
+    let duplicates: Vec<_> = groups.into_values().filter(|paths| paths.len() > 1).collect();
+    if duplicates.is_empty() { println!("没有发现重复书籍。"); }
+    for (index, paths) in duplicates.iter().enumerate() {
+        println!("重复组 {}（{} 个文件）", index + 1, paths.len());
+        for path in paths { println!("  {}", path.display()); }
+    }
+    println!("共发现 {} 组重复文件。", duplicates.len());
+    Ok(())
+}
+
+fn prune_missing_books(db: &Connection) -> Result<usize> {
+    let tx = db.unchecked_transaction()?;
+    let mut statement = tx.prepare("SELECT path FROM library_books")?;
+    let paths = statement.query_map([], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    drop(statement);
+    let missing: Vec<String> = paths.into_iter().filter(|path| !Path::new(path).is_file()).collect();
+    for path in &missing {
+        for table in ["reading_progress", "bookmarks", "annotations", "book_metadata", "book_tags", "library_books"] {
+            tx.execute(&format!("DELETE FROM {table} WHERE path=?1"), [path])?;
+        }
+    }
+    tx.execute("DELETE FROM tags WHERE id NOT IN (SELECT DISTINCT tag_id FROM book_tags)", [])?;
+    tx.commit()?;
+    Ok(missing.len())
+}
+
+fn relink_book_path(db: &Connection, old_path: &Path, new_path: &Path) -> Result<()> {
+    if !new_path.is_file() { anyhow::bail!("新文件不存在：{}", new_path.display()); }
+    let old = old_path.to_string_lossy();
+    let new = new_path.canonicalize().unwrap_or_else(|_| new_path.to_path_buf()).to_string_lossy().to_string();
+    let tx = db.unchecked_transaction()?;
+    let exists: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM library_books WHERE path=?1)", [&old], |row| row.get(0))?;
+    if !exists { anyhow::bail!("数据库中没有旧路径记录：{old}"); }
+    let collision: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM library_books WHERE path=?1)", [&new], |row| row.get(0))?;
+    if collision { anyhow::bail!("新路径已经在书库中：{new}"); }
+    for table in ["reading_progress", "bookmarks", "annotations", "book_metadata", "book_tags", "library_books"] {
+        tx.execute(&format!("UPDATE {table} SET path=?1 WHERE path=?2"), params![new, old.as_ref()])?;
+    }
+    tx.commit()?;
+    println!("已将书籍路径重新关联到：{new}");
+    Ok(())
 }
 
 fn has_column(db: &Connection, table: &str, column: &str) -> Result<bool> {
