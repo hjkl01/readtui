@@ -69,10 +69,10 @@ fn strip_doctype(source: &str) -> String {
     let mut search_from = 0;
 
     while search_from + 9 <= bytes.len() {
-        let Some(relative) = source[search_from..].find("<!DOCTYPE") else {
-            break;
-        };
-        let start = search_from + relative;
+        // HTML and ebook producers do not always preserve the XML keyword's case.
+        let start = (search_from..=bytes.len() - 9)
+            .find(|&index| bytes[index..index + 9].eq_ignore_ascii_case(b"<!DOCTYPE"));
+        let Some(start) = start else { break; };
         let mut index = start + 9;
         let mut quote = None;
         let mut subset_depth = 0usize;
@@ -80,27 +80,21 @@ fn strip_doctype(source: &str) -> String {
         while index < bytes.len() {
             let byte = bytes[index];
             if let Some(active_quote) = quote {
-                if byte == active_quote {
-                    quote = None;
-                }
+                if byte == active_quote { quote = None; }
             } else {
                 match byte {
-                    b'\'' | b'"' => quote = Some(byte),
+                    b'\\'' | b'"' => quote = Some(byte),
                     b'[' => subset_depth += 1,
                     b']' => subset_depth = subset_depth.saturating_sub(1),
-                    b'>' if subset_depth == 0 => {
-                        index += 1;
-                        break;
-                    }
+                    b'>' if subset_depth == 0 => { index += 1; break; }
                     _ => {}
                 }
             }
             index += 1;
         }
 
-        if index > bytes.len() || index == bytes.len() && bytes.last() != Some(&b'>') {
-            // Malformed, unterminated declaration: leave it intact so the XML
-            // parser reports the original syntax error.
+        if index == bytes.len() && bytes.last() != Some(&b'>') {
+            // Keep malformed, unterminated declarations for a useful parser error.
             search_from = start + 9;
             continue;
         }
@@ -115,25 +109,10 @@ fn strip_doctype(source: &str) -> String {
 }
 
 fn xhtml_to_text(source: &str) -> Result<String> {
-    let sanitized = strip_doctype(source);
-    let parsed = Document::parse(&sanitized).map_err(|e| anyhow!("EPUB XHTML 解析失败：{e}"))?;
-    let mut lines = Vec::new();
-    for node in parsed.descendants().filter(|node| node.is_element() && is_block(node.tag_name().name())) {
-        if node.ancestors().skip(1).any(|parent| parent.is_element() && is_block(parent.tag_name().name())) {
-            continue;
-        }
-        let text = node_text(node);
-        if !text.is_empty() { lines.push(text); }
-    }
-    if lines.is_empty() {
-        for node in parsed.descendants().filter(|node| node.is_text()) {
-            let text = node.text().unwrap_or("").split_whitespace().collect::<Vec<_>>().join(" ");
-            if !text.is_empty() { lines.push(text); }
-        }
-    }
-    Ok(lines.join("\n"))
+    // XHTML files in real-world EPUBs frequently contain HTML-compatible but
+    // not XML-well-formed markup (for example, unquoted attributes).
+    Ok(crate::formats::html_to_text(source))
 }
-
 
 pub fn read_metadata(path: &Path) -> Result<(Option<String>, Option<String>)> {
     let file = File::open(path)?;
@@ -287,6 +266,14 @@ mod tests {
         let sanitized = strip_doctype(internal);
         assert!(Document::parse(&sanitized).is_ok());
         assert!(sanitized.contains("保留正文"));
+    }
+
+    #[test]
+    fn accepts_lowercase_doctype_and_html_compatible_attributes() {
+        let html = r#"<!doctype html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://example.com/xhtml.dtd">
+<html><head><meta http-equiv=Content-Type content=text/html></head><body><p>容错正文</p></body></html>"#;
+        assert_eq!(xhtml_to_text(html).unwrap(), "容错正文");
+        assert!(!strip_doctype(html).contains("<!doctype"));
     }
 
     #[test]
