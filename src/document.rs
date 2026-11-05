@@ -207,6 +207,18 @@ mod tests {
     }
 
     #[test]
+    fn custom_chapter_patterns_are_applied() {
+        let path = std::env::temp_dir().join(format!("readtui-custom-chapter-{}.txt", std::process::id()));
+        std::fs::write(&path, "序章\n卷外篇：起始\n正文").unwrap();
+        let mut doc = Document::open(&path).unwrap();
+        let chapters = doc.detect_chapters_with_patterns(&[r"^卷外篇：.*".to_string()]).unwrap();
+        assert_eq!(chapters.len(), 2);
+        assert_eq!(chapters[1].title, "卷外篇：起始");
+        drop(doc);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn utf16_bom_files_decode_both_byte_orders() {
         let le = std::env::temp_dir().join(format!("readtui-utf16-le-{}.txt", std::process::id()));
         let be = std::env::temp_dir().join(format!("readtui-utf16-be-{}.txt", std::process::id()));
