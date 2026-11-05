@@ -25,7 +25,7 @@ The first development milestone provides a working foundation:
 - Detect duplicate files by content fingerprint, relink moved/missing books, and prune stale database records.
 - Track reading time, consecutive reading days, and a daily reading goal; switch between light and dark themes.
 
-The current format pipeline extracts EPUB 2/3 spine content, uses NCX/nav labels as chapter headings where available, and reads OPF title/creator metadata. It converts Markdown, HTML, and FB2 to cached text. A hierarchical EPUB navigation tree, images, footnotes, and advanced semantic formatting are not yet represented.
+The current format pipeline extracts EPUB 2/3 spine content, uses NCX/nav labels as chapter headings where available, and reads OPF title/creator metadata. MOBI books are decoded from PalmDOC/HUFF records when unencrypted; metadata is read from EXTH records. HTML-like content is parsed with an HTML5 parser to tolerate legacy and non-well-formed markup. Markdown, HTML, and FB2 are also converted to cached text. MOBI KF8/AZW3 reconstruction and DRM-protected books are not supported. A hierarchical EPUB navigation tree, images, footnotes, and advanced semantic formatting are not yet represented.
 
 ## Install
 
