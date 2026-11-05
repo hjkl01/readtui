@@ -650,7 +650,8 @@ impl App {
             let title = path.file_stem().and_then(|value| value.to_str()).unwrap_or("未命名").to_string();
             self.books.push(Book { path: path.clone(), title, author: String::new(), favorite: false, status: "unread".into(), tags: Vec::new() });
             self.books.sort_by(|a,b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
-            self.selected = self.books.iter().position(|book| book.path == path).unwrap_or(0);
+            self.refresh_visible_books();
+            self.selected = self.visible_books.iter().position(|index| self.books[*index].path == path).unwrap_or(0);
         }
         self.open_book(path)
     }
@@ -1006,6 +1007,7 @@ impl App {
             if !book.tags.iter().any(|existing| existing == tag) { book.tags.push(tag.to_string()); }
             self.status = format!("已添加标签：{tag}");
         }
+        self.refresh_visible_books();
         Ok(())
     }
 
@@ -1016,6 +1018,7 @@ impl App {
             book.tags.clear();
             self.status = "已清除该书全部标签".into();
         }
+        self.refresh_visible_books();
         Ok(())
     }
 
