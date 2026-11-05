@@ -118,6 +118,7 @@ Reader:
 | `t` | Open the table of contents |
 | `/` | Search the current book |
 | `C` | Search within the current chapter |
+| `K` | Configure custom chapter-heading regex rules (`;` separated; empty resets defaults) |
 | `b` / `B` | Add bookmark / browse bookmarks |
 | `m` / `M` | Add paragraph note / browse notes |
 | `e` / `d` in notes | Edit / delete selected note |
