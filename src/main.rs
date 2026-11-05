@@ -350,13 +350,13 @@ fn print_duplicate_books(root: &Path) -> Result<()> {
 
 fn prune_missing_books(db: &Connection) -> Result<usize> {
     let tx = db.unchecked_transaction()?;
-    let mut statement = tx.prepare("SELECT path FROM library_books")?;
+    let mut statement = tx.prepare("SELECT path FROM library_books UNION SELECT path FROM book_metadata UNION SELECT path FROM reading_progress UNION SELECT path FROM bookmarks UNION SELECT path FROM annotations")?;
     let paths = statement.query_map([], |row| row.get::<_, String>(0))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     drop(statement);
     let missing: Vec<String> = paths.into_iter().filter(|path| !Path::new(path).is_file()).collect();
     for path in &missing {
-        for table in ["reading_progress", "bookmarks", "annotations", "book_metadata", "book_tags", "library_books"] {
+        for table in ["reading_progress", "bookmarks", "annotations", "reading_sessions", "book_metadata", "book_tags", "library_books"] {
             tx.execute(&format!("DELETE FROM {table} WHERE path=?1"), [path])?;
         }
     }
@@ -370,13 +370,21 @@ fn relink_book_path(db: &Connection, old_path: &Path, new_path: &Path) -> Result
     let old = old_path.to_string_lossy();
     let new = new_path.canonicalize().unwrap_or_else(|_| new_path.to_path_buf()).to_string_lossy().to_string();
     let tx = db.unchecked_transaction()?;
-    let exists: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM library_books WHERE path=?1)", [&old], |row| row.get(0))?;
+    let exists: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM library_books WHERE path=?1)
+         OR EXISTS(SELECT 1 FROM book_metadata WHERE path=?1)
+         OR EXISTS(SELECT 1 FROM reading_progress WHERE path=?1)
+         OR EXISTS(SELECT 1 FROM bookmarks WHERE path=?1)
+         OR EXISTS(SELECT 1 FROM annotations WHERE path=?1)",
+        [&old], |row| row.get(0)
+    )?;
     if !exists { anyhow::bail!("数据库中没有旧路径记录：{old}"); }
     let collision: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM library_books WHERE path=?1)", [&new], |row| row.get(0))?;
     if collision { anyhow::bail!("新路径已经在书库中：{new}"); }
     for table in ["reading_progress", "bookmarks", "annotations", "book_metadata", "book_tags", "library_books"] {
         tx.execute(&format!("UPDATE {table} SET path=?1 WHERE path=?2"), params![new, old.as_ref()])?;
     }
+    tx.execute("INSERT OR IGNORE INTO library_books(path) VALUES (?1)", [&new])?;
     tx.commit()?;
     println!("已将书籍路径重新关联到：{new}");
     Ok(())
