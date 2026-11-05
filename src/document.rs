@@ -141,13 +141,20 @@ impl Document {
     }
 
     pub fn detect_chapters(&mut self) -> Result<Vec<Chapter>> {
-        let patterns = [
-            r"^\s*第[零〇一二三四五六七八九十百千万两0-9０-９]+[章节回卷集部篇].*",
-            r"^\s*(序章|楔子|引子|序言|后记|尾声|终章)\s*$",
-            r"^\s*Chapter\s+[0-9IVXivx]+.*",
-            r"^\s*卷[一二三四五六七八九十0-9]+.*",
+        self.detect_chapters_with_patterns(&[])
+    }
+
+    pub fn detect_chapters_with_patterns(&mut self, custom_patterns: &[String]) -> Result<Vec<Chapter>> {
+        let defaults = [
+            r"^\\s*第[零〇一二三四五六七八九十百千万两0-9０-９]+[章节回卷集部篇].*",
+            r"^\\s*(序章|楔子|引子|序言|后记|尾声|终章)\\s*$",
+            r"^\\s*Chapter\\s+[0-9IVXivx]+.*",
+            r"^\\s*卷[一二三四五六七八九十0-9]+.*",
         ];
-        let regexes: Vec<Regex> = patterns.iter().filter_map(|p| Regex::new(p).ok()).collect();
+        let mut regexes: Vec<Regex> = defaults.iter().map(|pattern| Regex::new(pattern).unwrap()).collect();
+        for pattern in custom_patterns.iter().filter(|pattern| !pattern.trim().is_empty()) {
+            regexes.push(Regex::new(pattern).with_context(|| format!("章节规则正则表达式无效：{pattern}"))?);
+        }
         let mut chapters = Vec::new();
         for line in 0..self.line_count() {
             let title = self.read_line(line)?.trim().to_string();
