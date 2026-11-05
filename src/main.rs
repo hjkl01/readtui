@@ -533,8 +533,10 @@ impl App {
     }
 
     fn add_bookmark(&mut self) -> Result<()> {
-        if let Some(reader) = &self.reader {
+        if let Some(reader) = &mut self.reader {
             let offset = reader.document.offset_for_line(reader.top);
+            let text = reader.document.read_line(reader.top)?;
+            reader.char_offset = char_offset_for_wrap_offset(&text, self.viewport_width, reader.wrap_offset);
             self.db.execute(
                 "INSERT INTO bookmarks(path,line,byte_offset,wrap_offset,char_offset) VALUES (?1,?2,?3,?4,?5)",
                 params![
