@@ -49,10 +49,6 @@ fn percent_decode(value: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-fn is_block(name: &str) -> bool {
-    matches!(name, "p" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "li" | "blockquote" | "pre" | "td" | "th")
-}
-
 fn node_text(node: Node<'_, '_>) -> String {
     node.descendants().filter(|child| child.is_text()).filter_map(|child| child.text())
         .collect::<Vec<_>>().join("")
