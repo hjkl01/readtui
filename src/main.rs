@@ -183,6 +183,9 @@ struct App {
     tag_mode: bool,
     metadata_mode: bool,
     goal_mode: bool,
+    typography_mode: bool,
+    horizontal_margin: u16,
+    vertical_margin: u16,
     library_search_mode: bool,
     show_search_results: bool,
     search_results: Vec<SearchResult>,
@@ -281,6 +284,9 @@ fn main() -> Result<()> {
         tag_mode: false,
         metadata_mode: false,
         goal_mode: false,
+        typography_mode: false,
+        horizontal_margin: load_setting(&db, "horizontal_margin").ok().and_then(|value| value.parse::<u16>().ok()).filter(|value| *value <= 20).unwrap_or(3),
+        vertical_margin: load_setting(&db, "vertical_margin").ok().and_then(|value| value.parse::<u16>().ok()).filter(|value| *value <= 5).unwrap_or(1),
         library_search_mode: false,
         show_search_results: false,
         search_results: Vec::new(),
@@ -891,6 +897,26 @@ impl App {
         Ok(())
     }
 
+    fn set_typography(&mut self, value: &str) -> Result<()> {
+        let mut parts = value.split(',');
+        let horizontal = parts.next().unwrap_or("").trim().parse::<u16>().ok();
+        let vertical = parts.next().unwrap_or("").trim().parse::<u16>().ok();
+        if parts.next().is_some() || horizontal.is_none() || vertical.is_none()
+            || horizontal.unwrap() > 20 || vertical.unwrap() > 5
+        {
+            self.status = "格式：横向边距,纵向边距；范围分别为 0-20 和 0-5".into();
+            return Ok(());
+        }
+        let horizontal = horizontal.unwrap();
+        let vertical = vertical.unwrap();
+        self.horizontal_margin = horizontal;
+        self.vertical_margin = vertical;
+        self.db.execute("INSERT INTO settings(key,value) VALUES ('horizontal_margin',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [horizontal.to_string()])?;
+        self.db.execute("INSERT INTO settings(key,value) VALUES ('vertical_margin',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [vertical.to_string()])?;
+        self.status = format!("阅读边距已更新：横向 {horizontal}，纵向 {vertical}");
+        Ok(())
+    }
+
     fn set_daily_goal(&mut self, value: &str) -> Result<()> {
         let minutes = value.trim().parse::<u32>().ok().filter(|v| (1..=1440).contains(v));
         if let Some(minutes) = minutes {
@@ -1053,7 +1079,7 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
         frame.render_stateful_widget(list, chunks[1], &mut app.list_state);
     } else if let Some(reader) = &mut app.reader {
         let body = Layout::default().direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(100)]).split(chunks[1])[0].inner(Margin { vertical: 1, horizontal: 3 });
+            .constraints([Constraint::Percentage(100)]).split(chunks[1])[0].inner(Margin { vertical: app.vertical_margin, horizontal: app.horizontal_margin });
         let height = body.height.max(1) as usize;
         let text_width = body.width.max(1) as usize;
         app.viewport_width = text_width;
@@ -1161,7 +1187,7 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
     if let Some(input) = &app.input {
         let popup = centered_rect(60, 20, area);
         frame.render_widget(Clear, popup);
-        let title = if app.directory_import_mode { "输入要导入的目录路径" } else if app.export_mode { "导出笔记/书签的 Markdown 文件路径" } else if app.annotation_edit_mode { "编辑笔记内容" } else if app.goal_mode { "每日阅读目标（分钟）" } else if app.library_search_mode { "跨书搜索关键词" } else if app.annotation_mode { "为当前段落添加笔记" } else if app.tag_filter_mode { "按标签筛选（留空清除）" } else if app.tag_mode { "输入标签名称" } else if app.metadata_mode { "编辑书名|作者（作者可留空）" } else if app.screen == Screen::Reader { "搜索当前书籍" } else { "输入文件路径" };
+        let title = if app.directory_import_mode { "输入要导入的目录路径" } else if app.export_mode { "导出笔记/书签的 Markdown 文件路径" } else if app.annotation_edit_mode { "编辑笔记内容" } else if app.goal_mode { "每日阅读目标（分钟）" } else if app.typography_mode { "阅读边距：横向,纵向（例如 3,1）" } else if app.library_search_mode { "跨书搜索关键词" } else if app.annotation_mode { "为当前段落添加笔记" } else if app.tag_filter_mode { "按标签筛选（留空清除）" } else if app.tag_mode { "输入标签名称" } else if app.metadata_mode { "编辑书名|作者（作者可留空）" } else if app.screen == Screen::Reader { "搜索当前书籍" } else { "输入文件路径" };
         frame.render_widget(Paragraph::new(input.as_str()).block(Block::default().title(title).borders(Borders::ALL)), popup);
     }
 }
@@ -1203,6 +1229,7 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 app.tag_mode = false;
                 app.metadata_mode = false;
                 app.goal_mode = false;
+                app.typography_mode = false;
                 app.tag_filter_mode = false;
                 app.library_search_mode = false;
             },
@@ -1220,6 +1247,9 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 } else if app.goal_mode {
                     app.goal_mode = false;
                     app.set_daily_goal(&value)?;
+                } else if app.typography_mode {
+                    app.typography_mode = false;
+                    app.set_typography(&value)?;
                 } else if app.library_search_mode {
                     app.library_search_mode = false;
                     app.search_library(&value)?;
@@ -1298,8 +1328,9 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
             KeyCode::Char('T') => { app.tag_filter_mode = true; app.input = Some(String::new()); },
             KeyCode::Char('S') => app.show_statistics()?,
             KeyCode::Char('G') => { app.goal_mode = true; app.input = Some(String::new()); },
+            KeyCode::Char('P') => { app.typography_mode = true; app.input = Some(format!("{},{}", app.horizontal_margin, app.vertical_margin)); },
             KeyCode::Char('c') => app.toggle_theme()?,
-            KeyCode::Char('?') => app.status = "↑/k 上移  ↓/j 下移  Enter 阅读  a 打开文件  A 导入目录  r 重扫书库  / 跨书搜索  F 状态筛选  T 标签筛选  f 收藏  s 状态  t 标签  e 编辑元数据  x 清空标签  o 收藏优先  G 每日目标  c 主题  S 统计  q 退出".into(),
+            KeyCode::Char('?') => app.status = "↑/k 上移  ↓/j 下移  Enter 阅读  a 打开文件  A 导入目录  r 重扫书库  / 跨书搜索  F 状态筛选  T 标签筛选  f 收藏  s 状态  t 标签  e 编辑元数据  x 清空标签  o 收藏优先  G 每日目标  P 阅读边距  c 主题  S 统计  q 退出".into(),
             _ => {}
         }
         app.list_state.select(if app.visible_books.is_empty() { None } else { Some(app.selected) });
