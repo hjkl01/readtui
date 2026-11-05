@@ -803,7 +803,8 @@ impl App {
     }
 
     fn toggle_favorite(&mut self) -> Result<()> {
-        if let Some(book) = self.books.get_mut(self.selected) {
+        if let Some(index) = self.selected_book_index() {
+            let book = &mut self.books[index];
             book.favorite = !book.favorite;
             self.db.execute(
                 "INSERT INTO book_metadata(path,title,author,favorite,status) VALUES (?1,?2,?3,?4,?5)
@@ -816,7 +817,8 @@ impl App {
     }
 
     fn cycle_book_status(&mut self) -> Result<()> {
-        if let Some(book) = self.books.get_mut(self.selected) {
+        if let Some(index) = self.selected_book_index() {
+            let book = &mut self.books[index];
             book.status = match book.status.as_str() {
                 "unread" => "reading",
                 "reading" => "finished",
@@ -835,7 +837,8 @@ impl App {
     fn add_tag_to_selected(&mut self, tag: &str) -> Result<()> {
         let tag = tag.trim();
         if tag.is_empty() { return Ok(()); }
-        if let Some(book) = self.books.get_mut(self.selected) {
+        if let Some(index) = self.selected_book_index() {
+            let book = &mut self.books[index];
             self.db.execute("INSERT OR IGNORE INTO tags(name) VALUES (?1)", [tag])?;
             let tag_id: i64 = self.db.query_row("SELECT id FROM tags WHERE name=?1", [tag], |row| row.get(0))?;
             self.db.execute("INSERT OR IGNORE INTO book_tags(path,tag_id) VALUES (?1,?2)", params![book.path.to_string_lossy().as_ref(), tag_id])?;
@@ -846,7 +849,8 @@ impl App {
     }
 
     fn clear_selected_tags(&mut self) -> Result<()> {
-        if let Some(book) = self.books.get_mut(self.selected) {
+        if let Some(index) = self.selected_book_index() {
+            let book = &mut self.books[index];
             self.db.execute("DELETE FROM book_tags WHERE path=?1", [book.path.to_string_lossy().as_ref()])?;
             book.tags.clear();
             self.status = "已清除该书全部标签".into();
@@ -855,7 +859,8 @@ impl App {
     }
 
     fn edit_selected_metadata(&mut self, value: &str) -> Result<()> {
-        if let Some(book) = self.books.get_mut(self.selected) {
+        if let Some(index) = self.selected_book_index() {
+            let book = &mut self.books[index];
             let mut parts = value.splitn(2, '|');
             let title = parts.next().unwrap_or("").trim();
             let author = parts.next().unwrap_or("").trim();
