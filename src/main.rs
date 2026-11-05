@@ -676,7 +676,7 @@ impl App {
                WHERE day >= date('now','localtime','-1 day')
              ),
              streak(day,n) AS (
-               SELECT day,1 FROM anchor
+               SELECT day,1 FROM anchor WHERE day IS NOT NULL
                UNION ALL
                SELECT date(streak.day,'-1 day'),streak.n+1
                FROM streak JOIN reading_days
@@ -688,7 +688,7 @@ impl App {
         let hours = total / 3600;
         let minutes = (total % 3600) / 60;
         self.statistics = Some(format!(
-            "累计阅读：{hours} 小时 {minutes} 分钟\n阅读会话：{sessions} 次\n今日：{} 分钟 / 目标 {goal} 分钟\n近 7 天：{} 分钟\n本月：{} 分钟\n\n连续阅读：{streak} 天\\n\\n按 Esc 关闭",
+            "累计阅读：{hours} 小时 {minutes} 分钟\n阅读会话：{sessions} 次\n今日：{} 分钟 / 目标 {goal} 分钟\n近 7 天：{} 分钟\n本月：{} 分钟\n\n连续阅读：{streak} 天\n按 Esc 关闭",
             today / 60, week / 60, month / 60
         ));
         Ok(())
