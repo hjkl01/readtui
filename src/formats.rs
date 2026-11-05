@@ -108,7 +108,8 @@ pub fn to_cache(source: &Path, cache_dir: &Path) -> Result<PathBuf> {
     };
     let target = cache_path(source, cache_dir, kind)?;
     if target.exists() { return Ok(target); }
-    if kind == "mobi" { return mobi_to_cache(source, cache_dir); }\n    let raw = fs::read_to_string(source).with_context(|| format!("无法读取 {} 文本", ext.to_uppercase()))?;
+    if kind == "mobi" { return mobi_to_cache(source, cache_dir); }
+    let raw = fs::read_to_string(source).with_context(|| format!("无法读取 {} 文本", ext.to_uppercase()))?;
     let text = match kind {
         "markdown" => markdown_to_text(&raw), "html" => html_to_text(&raw), "fb2" => fb2_to_text(&raw)?,
         _ => raw,
