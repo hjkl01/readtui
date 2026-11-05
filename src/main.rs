@@ -1271,7 +1271,25 @@ mod tests {
         init_db(&db).unwrap();
         assert!(has_column(&db, "reading_progress", "byte_offset").unwrap());
         assert!(has_column(&db, "reading_progress", "wrap_offset").unwrap());
+        assert!(has_column(&db, "reading_progress", "char_offset").unwrap());
         assert!(has_column(&db, "bookmarks", "byte_offset").unwrap());
         assert!(has_column(&db, "bookmarks", "wrap_offset").unwrap());
+        assert!(has_column(&db, "bookmarks", "char_offset").unwrap());
+    }
+
+    #[test]
+    fn character_anchor_survives_terminal_reflow() {
+        let text = "第一行第二行第三行第四行";
+        let original_row = 1;
+        let char_offset = char_offset_for_wrap_offset(text, 4, original_row);
+        assert!(char_offset > 0);
+        assert_eq!(wrap_offset_for_char_offset(text, 4, char_offset), original_row);
+        let resized_row = wrap_offset_for_char_offset(text, 6, char_offset);
+        let resized_rows = layout::wrap_line(text, 6);
+        assert!(resized_row < resized_rows.len());
+        assert_eq!(
+            char_offset_for_wrap_offset(text, 6, resized_row),
+            resized_rows.iter().take(resized_row).map(|row| row.chars().count()).sum()
+        );
     }
 }
