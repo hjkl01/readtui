@@ -14,7 +14,7 @@ The cache key includes the source path, file size, and modification time. The or
 
 ## Large text files
 
-Document::open performs one sequential buffered scan and records the byte offset of each line. It does not retain the full document in memory. The reader loads only the lines needed for the current viewport. Search and chapter detection also use sequential buffered reads.
+Document::open performs a sequential buffered scan and records the byte offset of each line. UTF-8 and legacy Chinese text are indexed by newline bytes; BOM-marked UTF-16 LE/BE files are indexed by 16-bit code units so byte offsets remain aligned. It does not retain the full document in memory. The reader loads only the lines needed for the current viewport. Search and chapter detection also use sequential buffered reads.
 
 Memory use is approximately proportional to the number of lines (one u64 offset per line), plus the current viewport and chapter index. A file containing millions of very short lines still needs a sizable offset index; a disk-backed index is a future optimization.
 
@@ -43,7 +43,7 @@ Tables:
 - reading_sessions: session start/end and duration.
 - book_metadata: title, author, favorite flag, and reading status.
 - tags / book_tags: user-defined labels.
-- settings: theme and daily reading goal.
+- settings: theme, daily reading goal, and reader margins.
 
 Original source files are not copied into SQLite.
 
@@ -53,7 +53,16 @@ Original source files are not copied into SQLite.
 - HTML conversion is intentionally lightweight and is not a full browser DOM renderer.
 - Markdown conversion is text-oriented, not a complete CommonMark renderer.
 - FB2 extraction supports common text blocks; images, binary attachments, and metadata editing are not exposed.
-- Legacy Chinese decoding is line-oriented. UTF-16 and user-selectable encodings are not yet implemented.
+- UTF-16 LE/BE is auto-detected when a BOM is present; BOM-less UTF-16 and user-selectable encodings are not yet implemented.
 - Cross-library search returns the first match per book and is a sequential scan, not a persistent full-text index.
-- Notes are attached to the current source line; selecting arbitrary text and editing existing annotations are future work.
+- PDF, MOBI, and AZW3 are not supported.
+- Notes are attached to the current source line; arbitrary text selection is not yet implemented (existing notes can be edited).
 - Daily, rolling-week, monthly, total statistics, daily goals, and consecutive reading-day streaks are implemented; charts and statistics export are not yet implemented.
+
+## Library maintenance
+
+- Favorite/status filters and an exact tag filter are applied as an in-memory view over the loaded library.
+- Duplicate detection computes a streaming content fingerprint and groups files with identical size and hash; it does not delete files automatically.
+- `--relink OLD=NEW` transactionally updates path references for progress, bookmarks, notes, metadata, tags, sessions, and library registration.
+- `--prune-missing` removes database records whose original files no longer exist. Review and back up the database before running it.
+- `--backup` uses SQLite `VACUUM INTO`; `--restore` verifies `PRAGMA integrity_check` before replacing the database.
