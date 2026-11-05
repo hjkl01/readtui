@@ -110,7 +110,7 @@ Reader:
 
 | Key | Action |
 |---|---|
-| `j` / `k`, arrows | Scroll one visual row |
+| `↑` / `↓` | Scroll half a screen |\n| `j` / `k` | Scroll one visual row |
 | `Space` / `PageDown` | Move forward one screen |
 | `PageUp` | Move backward one screen |
 | `g` / `Home`, `G` / `End` | Beginning / end |
